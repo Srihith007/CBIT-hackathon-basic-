@@ -74,7 +74,7 @@ export default function EvidenceUploader({ caseId, designation, onDone, submitLa
           <SourceMetaFields value={f.meta} onChange={setMeta(f.key)} errors={errors[f.key]} disabled={busy} idPrefix={`up-${i}`} filename={f.file.name} />
         </Card>
       ))}
-      <Field label="Sensor CSV" optional hint="Column mapping and units are set after upload through the API."><Input type="file" accept=".csv" disabled={busy} onChange={(e) => setSensor(e.target.files[0] || null)} /></Field>
+      <Field label="Sensor CSV" optional hint="After upload, map its columns and units on the Evidence page. Until then no sensor reading is used."><Input type="file" accept=".csv" disabled={busy} onChange={(e) => setSensor(e.target.files[0] || null)} /></Field>
       <Field label="Witness statement" optional><Textarea rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} disabled={busy} /></Field>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" variant="primary" loading={busy} disabled={!files.length && !sensor && !statement.trim()}>{busy ? 'Uploading…' : submitLabel}</Button>

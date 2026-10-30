@@ -24,19 +24,20 @@ import { FrameDrawer, SensorDrawer, StatementDrawer } from '../components/Eviden
 import { IncidentCards, IncidentGallery, IncidentOverview, IncidentVehicles } from '../components/IncidentAnalysis';
 import CaseBanner from '../components/CaseBanner';
 import LocalCaseMeta from '../components/LocalCaseMeta';
-import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, KeyObservations, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
+import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
 /** The navigation rail starts collapsed on screens narrower than 1600 px so the video stays the main element; the choice is remembered. */
 const readNav = () => { try { const v = localStorage.getItem(NAV_KEY); if (v) return v === 'open'; } catch { /* storage unavailable */ } return window.innerWidth >= 1600; };
 
-function EventTab({ event }) {
+function EventTab({ event, nameOf }) {
   if (!event) return <p className="t-small text-fg-3">Select an event on the timeline to inspect it.</p>;
   return (
     <div className="space-y-3">
       <div>
         <p className="t-small font-medium text-fg">{event.title}</p>
-        <p className="t-caption mt-1 flex flex-wrap items-center gap-2 text-fg-3"><Badge variant="neutral">{evidenceLabel(event)}</Badge>{event.start_ms != null ? `case time ${formatTime(event.start_ms)}` : 'Not placed on the case clock'}{event.trace && <span>{event.trace.complete ? 'trace complete' : 'trace incomplete'}</span>}</p>
+        <p className="t-caption mt-1 flex flex-wrap items-center gap-2 text-fg-3"><Badge variant="neutral">{evidenceLabel(event)}</Badge>{event.start_ms != null ? `case time ${formatTime(event.start_ms)}` : 'Not placed on the case clock'}</p>
+        <EventTrace event={event} nameOf={nameOf} />
       </div>
       <EventClocks event={event} />
       <PhaseInspector event={event} />
@@ -111,11 +112,13 @@ export default function Workspace() {
   const allVideos = useMemo(() => (data?.ev || []).filter((e) => e.kind === 'cctv' || e.kind === 'dashcam' || e.kind === 'other'), [data]);
   const nameOf = useCallback((id) => sourceName((data?.ev || []).find((e) => e.id === id)), [data]);
   const shown = useMemo(() => {
-    if (camera === 'all' || !data?.tl) return { tl: data?.tl, keyEvents, gaps: data?.gaps || [], items: incident?.items || [], unplaced: incident?.unplaced || [] };
+    const allOverlaps = data?.tl?.overlaps || [];
+    if (camera === 'all' || !data?.tl) return { tl: data?.tl, keyEvents, gaps: data?.gaps || [], overlaps: allOverlaps, items: incident?.items || [], unplaced: incident?.unplaced || [] };
     const only = (e) => e.source_id === camera;
     return {
       tl: { ...data.tl, lanes: Object.fromEntries(Object.entries(data.tl.lanes).map(([k, v]) => [k, v.filter(only)])) },
       keyEvents: keyEvents.filter(only),
+      overlaps: allOverlaps.filter((o) => o.evidence_ids.includes(camera)),
       gaps: (data.gaps || []).filter((g) => g.scope?.evidence_id === camera),
       items: (incident?.items || []).filter((i) => i.evidence_id === camera),
       unplaced: (incident?.unplaced || []).filter((i) => i.evidence_id === camera),
@@ -165,6 +168,11 @@ export default function Workspace() {
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [stepEvent]);
+  const addAssociation = useCallback(async (body) => {
+    await api.addAssociation(caseId, { scenario_id: scenarioId, ...body });
+    setAssoc(await api.associations(caseId, scenarioId));
+    api.completeness(caseId, scenarioId).then(setComplete).catch(() => {});
+  }, [caseId, scenarioId]);
   const seekTo = useCallback((ms) => { const st = useWorkspace.getState(); st.setPlaying(false); st.requestSeek(ms); }, []);
   useEffect(() => {
     const chosen = incident?.items?.find((item) => item.id === activeId) || incident?.unplaced?.find((item) => item.id === activeId) || incident?.items?.[0];
@@ -256,6 +264,7 @@ export default function Workspace() {
                 <p className="t-caption mt-2 text-fg-3" title="Percentages on boxes are the detector's score for that box, not the chance of an event. Nothing is drawn between sampled frames.">Stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Hover for what box labels mean.</p>
                 <div className="mt-3">
                   <IncidentOverview narrative={narrative} provenance={incident?.provenance} />
+                  <HypothesisExplanation data={narrative} nameOf={nameOf} />
                   <IncidentVehicles actors={data.actors} items={[...shown.items, ...shown.unplaced]} />
                   <KeyObservations events={shown.keyEvents} activeId={activeId} onSelect={(e) => { pick(e); setTab('overview'); }} nameOf={nameOf} />
                   <IncidentGallery items={frames} />
@@ -264,7 +273,7 @@ export default function Workspace() {
               <Panel as="section" className="p-3 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${shown.items.length} incident events · ${shown.keyEvents.length} key events of ${events.length} placed · times on the case clock`} className="!mb-3" />
                 <IncidentCards items={shown.items} unplaced={shown.unplaced} activeId={activeId} onSelect={pick} />
-                <Timeline tl={shown.tl} gaps={shown.gaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
+                <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
               </Panel>
             </div>
 
@@ -272,7 +281,7 @@ export default function Workspace() {
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
                 {tab === 'overview' && <Overview model={model} designation={eff.value} activeId={activeId} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
-                {tab === 'event' && <EventTab event={model.events[activeId]} />}
+                {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />
                   : model.findings.length === 0 ? <p className="t-small text-fg-3">No findings were produced for this reconstruction.</p>
@@ -291,13 +300,14 @@ export default function Workspace() {
           </div>
 
           <ContradictionsAndGaps cons={data.cons} crbs={data.crbs} gaps={shown.gaps} nameOf={nameOf} />
-          <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses} completeness={complete} onPickEvent={pickById} />
+          <Overlaps overlaps={shown.overlaps} nameOf={nameOf} onSeek={seekTo} />
+          <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses || []} completeness={complete} onPickEvent={pickById} />
           <details className="mt-4 rounded-lg border border-line p-3">
             <summary className="t-small cursor-pointer text-fg">Technical details</summary>
             <div className="mt-3 space-y-5">
               <section aria-label="Cross-camera association">
                 <h3 className="t-eyebrow mb-2 text-fg-3">Cross-camera association</h3>
-                <Associations state={assoc} nameOf={nameOf} />
+                <Associations state={assoc} nameOf={nameOf} videos={allVideos.filter((v) => v.kind !== 'other')} onAdd={addAssociation} />
               </section>
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>

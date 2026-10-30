@@ -36,6 +36,7 @@ export const api = {
   incidentNarrative: (id, scenario) => req(`/cases/${id}/incident-narrative${q({ scenario_id: scenario })}`),
   incidentFrames: (id, scenario, eventId) => req(`/cases/${id}/incident-frames${q({ scenario_id: scenario, event_id: eventId })}`),
   associations: (id, scenario) => req(`/cases/${id}/associations${q({ scenario_id: scenario })}`),
+  addAssociation: (id, body) => req(`/cases/${id}/associations`, { method: 'POST', body: JSON.stringify(body) }),
   completeness: (id, scenario) => req(`/cases/${id}/reconstruction/completeness${q({ scenario_id: scenario })}`),
   summary: (eventId) => req(`/events/${eventId}/summary`),
   contradictions: (id, s) => req(`/cases/${id}/contradictions${q({ scenario_id: s })}`),
@@ -71,6 +72,9 @@ export const api = {
     return body;
   },
   jobs: (id) => req(`/cases/${id}/jobs`),
+  sensors: (id) => req(`/cases/${id}/sensors`),
+  sensorPreview: (evId, body) => req(`/evidence/${evId}/sensor-preview`, { method: 'POST', body: JSON.stringify(body) }),
+  registerSensor: (id, body) => req(`/cases/${id}/sensors`, { method: 'POST', body: JSON.stringify(body) }),
   retryJob: (jobId) => req(`/jobs/${jobId}/retry`, { method: 'POST' }),
   addWitness: (id, label) => req(`/cases/${id}/witnesses`, { method: 'POST', body: JSON.stringify({ label }) }),
   addStatement: (wid, text, synthetic) => req(`/witnesses/${wid}/statements`, { method: 'POST', body: JSON.stringify({ text, synthetic }) }),

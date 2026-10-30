@@ -10,7 +10,7 @@ vi.mock('./api', () => ({
   api: {
     cases: vi.fn(), case: vi.fn(), dashboard: vi.fn(), jobs: vi.fn(), findings: vi.fn(), evidence: vi.fn(), sync: vi.fn(), witnesses: vi.fn(), statements: vi.fn(),
     frames: vi.fn(), patchCase: vi.fn(), reports: vi.fn(), reportById: vi.fn(), reportMd: vi.fn(), report: vi.fn(), scenarios: vi.fn(), actors: vi.fn(),
-    streamUrl: (id) => `/api/v1/evidence/${id}/stream`, pdfUrl: (id) => `/api/v1/reports/${id}/pdf`, setClock: vi.fn(), patchSource: vi.fn(),
+    streamUrl: (id) => `/api/v1/evidence/${id}/stream`, pdfUrl: (id) => `/api/v1/reports/${id}/pdf`, setClock: vi.fn(), patchSource: vi.fn(), sensors: vi.fn().mockResolvedValue({ items: [] }), sensorPreview: vi.fn(), registerSensor: vi.fn(),
   },
   ApiError: class extends Error {},
 }));
@@ -187,6 +187,24 @@ describe('evidence page: stored source details', () => {
     fireEvent.change(within(form).getByLabelText(/^Offset \(seconds\)/), { target: { value: '-1.5' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Save source details' }));
     await waitFor(() => expect(api.patchSource).toHaveBeenCalledWith('ev_1', expect.objectContaining({ clock_offset_reference_id: 'ev_2', clock_offset_ms: -1500 })));
+  });
+});
+
+describe('evidence page: sensor files', () => {
+  const sensorEv = { ...video, id: 'ev_sn', kind: 'sensor_csv', original_filename: 'drive.csv', video: null, sha256: 'c'.repeat(64), links: { original: '/api/v1/evidence/ev_sn/original' } };
+  it('offers column mapping for an unmapped sensor file and states that no reading is used yet', async () => {
+    api.evidence.mockResolvedValue({ items: [sensorEv] });
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, body: null, text: async () => 'timestamp,speed\n0,1\n' });
+    app('/evidence/case_r');
+    expect(await screen.findByText(/no column mapping, so no sensor reading is used yet/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Sensor data')).toHaveTextContent('0 of 1 sensor file(s) have a column mapping');
+  });
+  it('shows a registered mapping instead of the form', async () => {
+    api.evidence.mockResolvedValue({ items: [sensorEv] });
+    api.sensors.mockResolvedValue({ items: [{ evidence_id: 'ev_sn', clock: 'relative', sample_rate_hz: 10, mapping: { t: 'timestamp' }, units: { t: 's' } }] });
+    app('/evidence/case_r');
+    expect(await screen.findByText('Mapping registered')).toBeInTheDocument();
+    api.sensors.mockResolvedValue({ items: [] });
   });
 });
 

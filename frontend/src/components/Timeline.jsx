@@ -14,7 +14,7 @@ const MIN_WIDTH_MS = 200;
 
 /** Source lanes on one case clock. Pixel-accurate layout (text is never scaled). Event times are case-clock ms from the API;
  *  unplaced events (no usable time) are listed below and never drawn. The playhead is moved from a store subscription, not by React. */
-export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = false }) {
+export default function Timeline({ tl, gaps = [], overlaps = [], onSelect, onSeek, compact = false }) {
   const [ref, width] = useElementWidth();
   const activeId = useWorkspace((s) => s.activeEventId);
   const [filter, setFilter] = useState('all');
@@ -115,6 +115,13 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
             </g>
             {/* lane labels + click-to-seek surface */}
             <rect x={LEFT} y={RULER} width={plotW} height={h - RULER} fill="transparent" onPointerDown={seekAt} style={{ cursor: 'crosshair' }} />
+            <g clipPath="url(#plot)" aria-label="Recording overlap" pointerEvents="none">
+              {overlaps.filter((o) => o.start_ms != null && o.end_ms != null).map((o) => (
+                <rect key={`${o.evidence_ids.join('+')}:${o.start_ms}`} data-testid="overlap-band" x={x(o.start_ms)} y={RULER} width={Math.max(x(o.end_ms) - x(o.start_ms), 3)} height={Math.max(h - RULER - (bands.length ? ROW : 0), 4)} fill="rgb(var(--accent))" opacity="0.10">
+                  <title>{`Two sources overlap from ${formatTime(o.start_ms)} to ${formatTime(o.end_ms)} (case clock). Overlap is not contact and is not corroboration.`}</title>
+                </rect>
+              ))}
+            </g>
             {lanes.map(([k, label], i) => (
               <g key={k}>
                 <line x1={LEFT} x2={LEFT + plotW} y1={RULER + i * ROW + ROW} y2={RULER + i * ROW + ROW} stroke="rgb(var(--line))" />

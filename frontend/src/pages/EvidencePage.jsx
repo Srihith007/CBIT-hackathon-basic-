@@ -7,6 +7,7 @@ import CaseBanner from '../components/CaseBanner';
 import DesignationBadge from '../components/DesignationBadge';
 import JobStages from '../components/JobStages';
 import SourceMetaFields from '../components/SourceMetaFields';
+import SensorMapping from '../components/SensorMapping';
 import EvidenceUploader from '../components/EvidenceUploader';
 import { Statement } from '../components/Evidence';
 import { api } from '../api';
@@ -44,7 +45,7 @@ function Thumb({ e }) {
     : <div className="flex aspect-video w-full items-center justify-center rounded-md border border-line bg-surface-2 text-fg-3" aria-label="No preview available"><Icon className="h-6 w-6" aria-hidden /><span className="t-caption ml-2">No preview</span></div>;
 }
 
-function Detail({ e, jobs, sync, videoCount, others, onPreview, onSaved }) {
+function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, onSaved }) {
   const toast = useToast();
   const initial = useMemo(() => fromSource(e), [e]);
   const [meta, setMeta] = useState(initial);
@@ -129,6 +130,13 @@ function Detail({ e, jobs, sync, videoCount, others, onPreview, onSaved }) {
         )}
       </div>
 
+      {e.kind === 'sensor_csv' && (
+        <section aria-label="Sensor columns">
+          <SectionHeader title="Sensor columns" description="Which column is which, and in what unit. The original file is never changed." />
+          <SensorMapping evidence={e} caseId={caseId} registered={sensor} onDone={onSaved} />
+        </section>
+      )}
+
       {isVideo(e) && (
         <form onSubmit={save} aria-label="Edit source details" className="space-y-3">
           <SectionHeader title="Source details" description="Edit at any time. Original bytes are never changed." />
@@ -168,17 +176,17 @@ export default function EvidencePage() {
 
   const load = useCallback(async () => {
     try {
-      const [c, ev, jobs, sync, wit] = await Promise.all([api.case(caseId), api.evidence(caseId), api.jobs(caseId).catch(() => ({ items: [] })), api.sync(caseId).catch(() => null), api.witnesses(caseId).catch(() => ({ items: [] }))]);
+      const [c, ev, jobs, sync, wit, sens] = await Promise.all([api.case(caseId), api.evidence(caseId), api.jobs(caseId).catch(() => ({ items: [] })), api.sync(caseId).catch(() => null), api.witnesses(caseId).catch(() => ({ items: [] })), api.sensors(caseId).catch(() => ({ items: [] }))]);
       const statements = (await Promise.all(wit.items.map(async (w) => (await api.statements(w.id)).items.map((s) => ({ s, label: w.label }))))).flat();
       select(c);
-      setState({ status: 'ready', c, ev: ev.items, jobs: jobs.items, sync, statements });
+      setState({ status: 'ready', c, ev: ev.items, jobs: jobs.items, sync, statements, sensors: sens.items });
     } catch (e) { setState({ status: 'error', e }); }
   }, [caseId, select]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPick(null); }, [caseId]);
   const setViewKeep = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage unavailable */ } };
 
-  const { c, ev = [], jobs = [], sync, statements = [] } = state;
+  const { c, ev = [], jobs = [], sync, statements = [], sensors = [] } = state;
   const eff = c ? effectiveDesignation(c.designation, ev) : null;
   const selected = ev.find((e) => e.id === pick) || ev[0] || null;
   const videoCount = ev.filter(isVideo).length;
@@ -237,7 +245,7 @@ export default function EvidencePage() {
           ) : (
             <Card padded={false} className="mb-6 overflow-x-auto"><DataTable caption="Sources" rows={sources} columns={cols} onRowClick={(r) => setPick(r.e.id)} initialSort={null} renderMobileRow={(r) => <button type="button" className="w-full p-4 text-left" onClick={() => setPick(r.e.id)}>{r.e.original_filename}</button>} /></Card>
           )}
-          {selected && <Detail key={selected.id} e={selected} others={ev.filter((o) => o.id !== selected.id && isVideo(o))} jobs={jobs} sync={sync} videoCount={videoCount} onPreview={setPreview} onSaved={load} />}
+          {selected && <Detail key={selected.id} caseId={c.id} sensor={sensors.find((x) => x.evidence_id === selected.id)} e={selected} others={ev.filter((o) => o.id !== selected.id && isVideo(o))} jobs={jobs} sync={sync} videoCount={videoCount} onPreview={setPreview} onSaved={load} />}
         </>
       )}
 
@@ -247,7 +255,7 @@ export default function EvidencePage() {
       </section>
       <section aria-label="Sensor data" className="mt-6">
         <SectionHeader title="Sensor data" />
-        {ev.some((e) => e.kind === 'sensor_csv') ? <p className="t-small text-fg-2">Sensor files are listed above. Column mapping and unit normalization are not available in this interface yet.</p> : <p className="t-small text-fg-3">No sensor file has been uploaded to this case.</p>}
+        {ev.some((e) => e.kind === 'sensor_csv') ? <p className="t-small text-fg-2">{sensors.length} of {ev.filter((e) => e.kind === 'sensor_csv').length} sensor file(s) have a column mapping. Select a sensor file above to map its columns.</p> : <p className="t-small text-fg-3">No sensor file has been uploaded to this case.</p>}
       </section>
       <p className="t-caption mt-6 text-fg-3">Identical files uploaded twice to one case are stored once and are not counted as separate corroboration. <Link to={`/reconstruction/${c.id}`}>Open the reconstruction</Link></p>
 
