@@ -141,6 +141,11 @@ def test_selected_accident_video_is_detected_tracked_and_reviewed(client):
         if ev["category"] == "machine_detection":
             src = ev["observations"]["source_time_ms"]
             assert ev["start_ms"] == round(src[0]) and ev["end_ms"] == round(src[1])
+            assert ev["evidence_class"] == "derived_observation"
+            assert ev["trace"]["complete"] is True and ev["trace"]["evidence_ids"] == [eid]
+            assert ev["clocks"]["case_ms"][0] == ev["start_ms"]
+            assert ev["clocks"]["synchronized_ms"] is None
+            assert ev["clocks"]["media_ms"][0] == src[0]
         if ev["event_type"] == "possible_collision":
             assert ev["category"] == "machine_detection"
             assert "not physical contact" in ev["observations"]["note"]

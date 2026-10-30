@@ -26,5 +26,6 @@ from app.models.reconstruction import (  # noqa: F401
     Report,
     SyncGroup,
     Trajectory,
+    VehicleAssociation,
 )
 from app.models.engine import ClockRecord, GapRecord, SourceEvent, SyncEdge  # noqa: E402,F401

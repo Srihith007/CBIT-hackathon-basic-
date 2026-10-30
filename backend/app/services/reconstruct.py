@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session
 from app.db import new_id
 from app.models import (Actor, ActorLink, Camera, Case, Contradiction, Corroboration, Event, EventSource, EventSummary, EvidenceFile,
                         ExtractedFrame, GapRecord, InvestigationFinding, ModelRun, ReconstructionScenario, SensorRecord, SensorSource,
-                        SourceAnnotation, SourceEvent, Trajectory, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
+                        SourceAnnotation, SourceEvent, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
 from app.models.engine import ClockRecord, SyncEdge
 from app.config import get_settings
 from app.llm.featherless import FeatherlessClient
 from app.services import audit, engine_rules as rules, geometry, incident, sync
+from app.services.reconstruction_view import associations_from_links
 from app.services.sources import annotation_edges
 
 ENGINE_VERSION = "1"
@@ -245,6 +246,19 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         c["id"] = row.id
     for c, row in zip(corr["corroborations"], crb_rows):
         c["id"] = row.id
+    if actors:
+        link_rows = db.execute(select(ActorLink).where(
+            ActorLink.actor_id.in_(list(actors)), ActorLink.status == "confirmed", ActorLink.ref_type == "track")).scalars()
+        for payload in associations_from_links(
+            [{"pk": t.id, "evidence_id": t.evidence_id, "track_id": t.track_id} for t in track_rows],
+            [{"id": link.id, "actor_id": link.actor_id, "ref_id": link.ref_id} for link in link_rows],
+            [{"id": row.id, "event_a": row.event_a, "event_b": row.event_b} for row in con_rows],
+            {item["id"]: item["evidence_id"] for item in events},
+        ):
+            db.add(VehicleAssociation(
+                case_id=case.id, scenario_id=scn.id, status="uncertain", tracks=payload["tracks"],
+                supporting=payload["supporting"], contradicting=payload["contradicting"], basis=payload["basis"], created_by=who,
+            ))
 
     # ---- gaps
     facts = _gap_facts(db, case, media, lk, solved, events, tracks_pk, track_rows, conf, cand, corr, labels, evs)

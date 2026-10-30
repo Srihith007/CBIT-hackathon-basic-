@@ -34,6 +34,26 @@ class SourceAnnotation(Base):
     )
 
 
+class VehicleAssociation(Base):
+    """A possible link between tracks on different cameras. Status stays uncertain. Track ids are not matched."""
+
+    __tablename__ = "vehicle_associations"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id("vas"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id"))
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("reconstruction_scenarios.id"))
+    status: Mapped[str] = mapped_column(String(12), default="uncertain")
+    tracks: Mapped[list] = mapped_column(JSONB)
+    supporting: Mapped[list] = mapped_column(JSONB)
+    contradicting: Mapped[list] = mapped_column(JSONB)
+    basis: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("status = 'uncertain'", name="ck_vas_status"),
+        Index("ix_vas_scenario", "case_id", "scenario_id"),
+    )
+
+
 class Actor(Base):
     __tablename__ = "actors"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id("act"))

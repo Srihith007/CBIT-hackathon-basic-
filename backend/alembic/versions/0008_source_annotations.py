@@ -45,6 +45,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS source_annotations")
+    op.execute("DELETE FROM evidence_files WHERE kind = 'other'")
     op.execute("ALTER TABLE evidence_files DROP CONSTRAINT ck_evidence_kind")
     op.execute(
         "ALTER TABLE evidence_files ADD CONSTRAINT ck_evidence_kind CHECK "
