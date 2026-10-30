@@ -68,6 +68,8 @@ export const api = {
   addWitness: (id, label) => req(`/cases/${id}/witnesses`, { method: 'POST', body: JSON.stringify({ label }) }),
   addStatement: (wid, text, synthetic) => req(`/witnesses/${wid}/statements`, { method: 'POST', body: JSON.stringify({ text, synthetic }) }),
   fullFrameUrl: (frameId) => `${BASE}/frames/${frameId}/image?full=true`,
+  modelRuns: (evId) => req(`/evidence/${evId}/model-runs`),
+  tracks: (evId) => req(`/evidence/${evId}/tracks`),
   streamUrl: (evId) => `${BASE}/evidence/${evId}/stream`,
   pdfUrl: (rid) => `${BASE}/reports/${rid}/pdf`,
 };

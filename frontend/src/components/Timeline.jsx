@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Scan } from 'lucide-react';
-import { Badge, Button, FilterChips, IconButton, useElementWidth } from '../ui-kit';
+import { Badge, Button, FilterChips, IconButton, Segmented, useElementWidth } from '../ui-kit';
 import { useWorkspace } from '../store';
 import { CATEGORY_STYLE, LANES } from '../fmt';
 import { formatTime, formatUncertainty, rulerTicks, tickLabel } from '../lib/time';
+import { isSignificant } from '../lib/overview';
 
 const ROW = 30;
 const LEFT = 84;
@@ -17,6 +18,9 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
   const [ref, width] = useElementWidth();
   const activeId = useWorkspace((s) => s.activeEventId);
   const [filter, setFilter] = useState('all');
+  const [scope, setScope] = useState('key');
+  const highlight = useWorkspace((s) => s.highlightIds);
+  const focus = useWorkspace((s) => s.focusRange);
   const [view, setView] = useState(null);
   const head = useRef(null);
   const headLabel = useRef(null);
@@ -29,8 +33,12 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
   viewRef.current = v;
   const plotW = Math.max(width - LEFT - 8, 10);
   const x = (ms) => LEFT + ((ms - v.start) / v.width) * plotW;
-  const lanes = LANES.filter(([k]) => tl.lanes[k]?.length);
-  const h = RULER + lanes.length * ROW + 6;
+  const bands = gaps.filter((g) => g.scope.case_from_ms != null && g.scope.case_to_ms != null);
+  const visible = (e) => (scope === 'all' || isSignificant(e)) && (filter === 'all' || e.category === filter);
+  const lanes = LANES.filter(([k]) => tl.lanes[k]?.some(visible));
+  const rowsN = lanes.length + (bands.length ? 1 : 0);
+  const gapRow = lanes.length;
+  const h = RULER + rowsN * ROW + 6;
   const { step, ticks } = rulerTicks(v.start, v.width, Math.max(Math.floor(plotW / 70), 3));
 
   const setWindow = (start, w) => {
@@ -73,14 +81,13 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
     else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) setWindow(v.start + (e.deltaX / plotW) * v.width, v.width);
   };
 
-  const visible = (e) => filter === 'all' || e.category === filter;
-  const bands = gaps.filter((g) => g.scope.case_from_ms != null && g.scope.case_to_ms != null);
-  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.id, f.id === 'all' ? Object.values(tl.lanes).flat().length : Object.values(tl.lanes).flat().filter((e) => e.category === f.id).length])), [tl]);
+  const counts = useMemo(() => { const base = Object.values(tl.lanes).flat().filter((e) => scope === 'all' || isSignificant(e)); return Object.fromEntries(FILTERS.map((f) => [f.id, f.id === 'all' ? base.length : base.filter((e) => e.category === f.id).length])); }, [tl, scope]);
 
   return (
     <div>
       {!compact && (
         <div className="mb-3 flex items-center gap-2">
+          <Segmented size="sm" label="Event scope" value={scope} onChange={setScope} options={[{ id: 'key', label: 'Key events' }, { id: 'all', label: 'All events' }]} />
           <FilterChips label="Event category" value={filter} onChange={setFilter} items={FILTERS.map((f) => ({ ...f, count: counts[f.id] }))} className="min-w-0 flex-1 [@media(max-height:1100px)]:!flex-nowrap [@media(max-height:1100px)]:overflow-x-auto [&_button]:h-8 [&_button]:shrink-0 [&_button]:px-3" />
           <div className="ml-auto flex items-center gap-1.5">
             <IconButton icon={Minus} label="Zoom out" variant="outline" size="sm" onClick={() => zoom(1.5)} />
@@ -114,9 +121,11 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
                 <text x={10} y={RULER + i * ROW + ROW / 2 + 4} className="fill-fg-2" fontSize="11" fontWeight="500">{label}</text>
               </g>
             ))}
+            {bands.length > 0 && <g><line x1={LEFT} x2={LEFT + plotW} y1={RULER + gapRow * ROW + ROW} y2={RULER + gapRow * ROW + ROW} stroke="rgb(var(--line))" /><text x={10} y={RULER + gapRow * ROW + ROW / 2 + 4} className="fill-warning" fontSize="11" fontWeight="500">Gaps</text></g>}
             <g clipPath="url(#plot)">
+              {focus && <rect x={x(focus.start)} y={RULER} width={Math.max(x(focus.end) - x(focus.start), 4)} height={h - RULER} fill="rgb(var(--accent))" opacity="0.13" pointerEvents="none"><title>Selected finding interval</title></rect>}
               {bands.map((g) => (
-                <rect key={g.id} x={x(g.scope.case_from_ms)} y={RULER} width={Math.max(x(g.scope.case_to_ms) - x(g.scope.case_from_ms), 3)} height={h - RULER} fill="url(#hatch)" pointerEvents="none">
+                <rect key={g.id} x={x(g.scope.case_from_ms)} y={RULER + gapRow * ROW + 4} width={Math.max(x(g.scope.case_to_ms) - x(g.scope.case_from_ms), 3)} height={ROW - 8} rx={3} fill="url(#hatch)" stroke="rgb(var(--warning))" strokeOpacity="0.6" pointerEvents="none">
                   <title>{`${g.gap_type.replace(/_/g, ' ')} · ${formatTime(g.scope.case_from_ms)} to ${formatTime(g.scope.case_to_ms)} (case clock): no data`}</title>
                 </rect>
               ))}
@@ -127,6 +136,8 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
                 const x0 = x(e.start_ms);
                 const w = x(e.end_ms ?? e.start_ms) - x0;
                 const sel = activeId === e.id;
+                const dim = highlight.length > 0 && !highlight.includes(e.id);
+                const lit = highlight.includes(e.id);
                 const ring = m.contradicted_by?.length ? 'rgb(var(--danger))' : m.corroborated_by?.length ? 'rgb(var(--success))' : null;
                 const stroke = ring || (sel ? 'rgb(var(--fg))' : 'none');
                 return (
@@ -135,8 +146,8 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
                     <title>{`${e.title}\ncase ${formatTime(e.start_ms)} ${formatUncertainty(e.uncertainty_ms)}${m.contradicted_by?.length ? '\ncontradicted' : ''}${m.corroborated_by?.length ? '\ncorroborated' : ''}`}</title>
                     {e.uncertainty_ms > 0 && <rect x={x(e.start_ms - e.uncertainty_ms)} y={cy - 2} width={Math.max(x(e.start_ms + e.uncertainty_ms) - x(e.start_ms - e.uncertainty_ms), 2)} height={4} rx={2} fill={color} opacity="0.28" />}
                     {w > 9
-                      ? <rect x={x0} y={cy - 7} width={w} height={14} rx={3} fill={color} opacity={sel ? 1 : 0.72} stroke={stroke} strokeWidth={ring || sel ? 2 : 0} />
-                      : <rect x={x0 - 5} y={cy - 5} width={10} height={10} transform={`rotate(45 ${x0} ${cy})`} fill={color} opacity={sel ? 1 : 0.9} stroke={stroke} strokeWidth={ring || sel ? 2 : 0} />}
+                      ? <rect x={x0} y={cy - 7} width={w} height={14} rx={3} fill={color} opacity={dim ? 0.25 : sel || lit ? 1 : 0.72} stroke={lit && !ring ? 'rgb(var(--accent))' : stroke} strokeWidth={ring || sel || lit ? 2 : 0} />
+                      : <rect x={x0 - 5} y={cy - 5} width={10} height={10} transform={`rotate(45 ${x0} ${cy})`} fill={color} opacity={dim ? 0.25 : sel || lit ? 1 : 0.9} stroke={lit && !ring ? 'rgb(var(--accent))' : stroke} strokeWidth={ring || sel || lit ? 2 : 0} />}
                   </g>
                 );
               }))}
@@ -150,11 +161,12 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
           </svg>
         )}
       </div>
+      {lanes.length === 0 && <p className="t-small mt-2 text-fg-3" role="status">{Object.values(tl.lanes).flat().length ? 'No events match the current filter. Switch to All events.' : 'No events were produced for this case, so there is nothing to place on the timeline.'}</p>}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="t-caption text-fg-3">Case clock (reference source = 0). Ruler step {step >= 1000 ? `${step / 1000} s` : `${step} ms`}. Click an empty area to seek; Ctrl/⌘ + wheel zooms.</span>
         <span className="t-caption inline-flex items-center gap-1 text-fg-3"><i className="inline-block h-2 w-3 rounded-sm bg-danger/60" />contradicted</span>
         <span className="t-caption inline-flex items-center gap-1 text-fg-3"><i className="inline-block h-2 w-3 rounded-sm bg-success/60" />corroborated</span>
-        <span className="t-caption inline-flex items-center gap-1 text-fg-3"><i className="inline-block h-2 w-3 rounded-sm" style={{ background: 'repeating-linear-gradient(45deg, rgb(var(--danger)/.55) 0 2px, transparent 2px 5px)' }} />missing data</span>
+        <span className="t-caption inline-flex items-center gap-1 text-fg-3"><i className="inline-block h-2 w-3 rounded-sm" style={{ background: 'repeating-linear-gradient(45deg, rgb(var(--danger)/.55) 0 2px, transparent 2px 5px)' }} />missing data (Gaps lane)</span>
       </div>
       {tl.unplaced?.length > 0 && !compact && (
         <details className="mt-3">

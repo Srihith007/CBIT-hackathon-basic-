@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FastForward, Maximize2, Pause, Play, Rewind, StepBack, StepForward } from 'lucide-react';
-import { Badge, Button, IconButton, Segmented } from '../ui-kit';
+import { Badge, Button, Checkbox, IconButton, Segmented } from '../ui-kit';
 import { api } from '../api';
 import { useWorkspace } from '../store';
 import { ACTOR_COLORS } from '../fmt';
@@ -34,7 +34,8 @@ export default function Player({ videos, shifts, trackActors, actorLabels, range
   const seekId = useWorkspace((s) => s.seek.latest);
   const settled = useWorkspace((s) => s.seekSettled);
   const primaryId = useWorkspace((s) => s.primaryVideoId) || videos[0]?.id;
-  const { setPlaying, setRate, setTime, requestSeek, ackSeek, setPrimaryVideo } = useWorkspace.getState();
+  const overlaysOn = useWorkspace((s) => s.overlays);
+  const { setPlaying, setRate, setTime, requestSeek, ackSeek, setPrimaryVideo, toggleOverlay } = useWorkspace.getState();
 
   const primary = videos.find((v) => v.id === primaryId) || videos[0];
   const syncedMaster = shifts[primary?.id] != null ? primary : videos.find((v) => shifts[v.id] != null);
@@ -141,10 +142,14 @@ export default function Player({ videos, shifts, trackActors, actorLabels, range
             <TimeReadout label="media" map={mediaMap} className="text-fg-3" />
             {!settled && <span className="t-caption text-fg-3" role="status">seeking…</span>}
           </div>
-          <Segmented className="ml-auto" size="sm" label="Playback speed" value={rate} onChange={(v) => setRate(Number(v))} options={[0.25, 0.5, 1, 2].map((r) => ({ id: r, label: `${r}×` }))} />
+          <div className="ml-auto flex items-center gap-3">
+            <Checkbox label="Boxes" checked={overlaysOn.boxes} onChange={() => toggleOverlay('boxes')} />
+            <Checkbox label="Labels" checked={overlaysOn.ids} onChange={() => toggleOverlay('ids')} />
+          </div>
+          <Segmented size="sm" label="Playback speed" value={rate} onChange={(v) => setRate(Number(v))} options={[0.25, 0.5, 1, 2].map((r) => ({ id: r, label: `${r}×` }))} />
           <IconButton icon={Maximize2} label="Fullscreen (f)" variant="outline" size="sm" onClick={fullscreen} />
         </div>
-        <p className="t-caption text-fg-3">Space play/pause · ←/→ one frame ({frameMs.toFixed(1)} ms), Shift 1 s · ↑/↓ speed · f fullscreen. Frame step is the primary video's measured frame period.</p>
+        <p className="t-caption text-fg-3" title="Frame step is the primary video's measured frame period">Space play/pause · ←/→ frame ({frameMs.toFixed(1)} ms), Shift 1 s · ↑/↓ speed · f fullscreen · [ ] key events</p>
       </div>
     </div>
   );
@@ -190,7 +195,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
     if (!overlays.boxes || !el.videoWidth) return;
     const sample = latestSample(cache.current.items, el.currentTime * 1000);
     if (!sample) return;
-    const tf = containTransform(el.videoWidth, el.videoHeight, w, h);
+    const tf = containTransform(el.videoWidth, el.videoHeight, w, h, v.video.width || el.videoWidth, v.video.height || el.videoHeight);
     sample.boxes.forEach((b) => {
       const r = mapBox(b.bbox, tf);
       const actor = trackActors[`${v.id}:${b.track_id}`];
@@ -229,7 +234,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
   const inside = shift != null && (() => { const m = currentMs * 250 + shift; return m >= 0 && m <= v.video.duration_ms; })();
   return (
     <figure className="card overflow-hidden" data-primary={primary ? '1' : undefined}>
-      <div className="relative w-full bg-black [@media(max-height:1100px)]:max-h-[32vh] [@media(min-height:1101px)]:max-h-[min(52vh,560px)]" style={{ aspectRatio: `${v.video.width} / ${v.video.height}` }}>
+      <div className="relative mx-auto w-full bg-black [@media(max-height:1100px)]:max-h-[32vh] [@media(min-height:1101px)]:max-h-[min(52vh,560px)]" style={{ aspectRatio: `${v.video.width} / ${v.video.height}`, maxWidth: primary ? `min(100%, ${(40 * v.video.width / v.video.height).toFixed(1)}vh)` : '100%' }}>
         <video ref={(el) => { video.current = el; setRef(el); }} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
         {shift == null && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">Not synchronized: no recorded clock relation. Not slaved to the case clock.</div>}

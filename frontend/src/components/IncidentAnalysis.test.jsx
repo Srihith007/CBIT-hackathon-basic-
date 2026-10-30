@@ -12,6 +12,7 @@ vi.mock('../api', () => ({
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
     seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), summary: vi.fn(),
+    jobs: vi.fn(), modelRuns: vi.fn(), review: vi.fn(),
     overlays: vi.fn(), streamUrl: (id) => `/api/v1/evidence/${id}/stream`,
   },
 }));
@@ -125,6 +126,8 @@ describe('primary workspace', () => {
     api.findings.mockResolvedValue({ items: [] });
     api.trajectories.mockResolvedValue({ items: [] });
     api.seek.mockResolvedValue({ targets: [], unsynchronized: [] });
+    api.jobs.mockResolvedValue({ items: [] });
+    api.modelRuns.mockResolvedValue({ items: [] });
     api.incidentEvents.mockResolvedValue({ scenario_id: 'scn_1', contact_status: 'insufficient_evidence', provenance: 'none', items: [], unplaced: [] });
     api.incidentNarrative.mockResolvedValue({
       contact_status: 'insufficient_evidence',
@@ -139,6 +142,6 @@ describe('primary workspace', () => {
     const details = screen.getByText('Technical detail').closest('details');
     expect(details.open).toBe(false);
     expect(details).toHaveTextContent('No trajectory for this camera yet.');
-    expect(screen.getByText(/consistent with an impact/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Evidence correlation')).toHaveTextContent('consistent with an impact, not proof');
   });
 });

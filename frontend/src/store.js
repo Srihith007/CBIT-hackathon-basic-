@@ -13,11 +13,14 @@ export const useWorkspace = create((set) => ({
   pinnedId: null,
   pinnedAt: null,
   selectedActorId: null,
+  selectedFindingId: null,
+  highlightIds: [],
+  focusRange: null,
   primaryVideoId: null,
   seek: createSeekState(),
   seekSettled: true,
   overlays: { boxes: true, ids: true },
-  reset: (caseId, scenarioId) => set({ caseId, scenarioId, currentMs: 0, playing: false, activeEventId: null, pinnedId: null, pinnedAt: null, selectedActorId: null, seek: createSeekState(), seekSettled: true }),
+  reset: (caseId, scenarioId) => set({ caseId, scenarioId, currentMs: 0, playing: false, activeEventId: null, pinnedId: null, pinnedAt: null, selectedActorId: null, selectedFindingId: null, highlightIds: [], focusRange: null, seek: createSeekState(), seekSettled: true }),
   setTime: (currentMs) => set({ currentMs }),
   setPlaying: (playing) => set({ playing }),
   setRate: (rate) => set({ rate }),
@@ -25,6 +28,8 @@ export const useWorkspace = create((set) => ({
   /** Explicit selection: pins the event at the time it seeks to. */
   selectEvent: (id, ms) => set({ activeEventId: id, pinnedId: id, pinnedAt: ms ?? null }),
   selectActor: (selectedActorId) => set({ selectedActorId }),
+  /** A selected finding highlights its events and interval on the timeline; cleared with `null`. */
+  setFinding: (selectedFindingId, highlightIds = [], focusRange = null) => set({ selectedFindingId, highlightIds, focusRange }),
   setPrimaryVideo: (primaryVideoId) => set({ primaryVideoId }),
   /** Latest-wins: returns the request id the player must echo back through `ackSeek`. */
   requestSeek: (ms) => {
