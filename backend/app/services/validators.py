@@ -205,7 +205,7 @@ def validate_data_file(path: Path, kind: str) -> dict:
 
 
 def validate(kind: str, path: Path) -> dict:
-    if kind in ("dashcam", "cctv"):
+    if kind in ("dashcam", "cctv", "other"):
         return validate_video(path)
     if kind == "sensor_csv":
         return validate_sensor_csv(path)

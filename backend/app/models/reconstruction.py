@@ -8,6 +8,32 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base, new_id
 
 
+class SourceAnnotation(Base):
+    """Investigator description of a source. The evidence file itself stays immutable."""
+
+    __tablename__ = "source_annotations"
+    evidence_id: Mapped[str] = mapped_column(ForeignKey("evidence_files.id"), primary_key=True)
+    display_name: Mapped[str | None] = mapped_column(String(160))
+    location_text: Mapped[str | None] = mapped_column(Text)
+    recording_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recording_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    camera_role: Mapped[str | None] = mapped_column(String(10))
+    clock_offset_ms: Mapped[int | None] = mapped_column(Integer)
+    clock_offset_reference_id: Mapped[str | None] = mapped_column(ForeignKey("evidence_files.id"))
+    clock_offset_basis: Mapped[str | None] = mapped_column(String(40))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        CheckConstraint("camera_role IS NULL OR camera_role IN ('cctv','dashcam','other')", name="ck_src_camera_role"),
+        CheckConstraint("clock_offset_basis IS NULL OR clock_offset_basis = 'declared_by_investigator'", name="ck_src_offset_basis"),
+        CheckConstraint(
+            "(clock_offset_ms IS NULL AND clock_offset_reference_id IS NULL) OR (clock_offset_ms IS NOT NULL AND clock_offset_reference_id IS NOT NULL)",
+            name="ck_src_offset_pair",
+        ),
+        CheckConstraint("clock_offset_reference_id IS NULL OR clock_offset_reference_id <> evidence_id", name="ck_src_offset_distinct"),
+    )
+
+
 class Actor(Base):
     __tablename__ = "actors"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id("act"))

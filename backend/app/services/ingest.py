@@ -27,7 +27,7 @@ def ingest_upload(session: Session, settings: Settings, *, case: Case, upload: U
             {"designation": case.designation, "synthetic": True},
         )
 
-    limit = (settings.max_video_mb if kind in VIDEO_KINDS else settings.max_other_mb) * 1024 * 1024
+    limit = (settings.max_video_mb if kind in VIDEO_KINDS or kind == "other" else settings.max_other_mb) * 1024 * 1024
     try:
         staged = stage_upload(upload.file, settings.storage_path, limit)
     except UploadTooLarge as exc:

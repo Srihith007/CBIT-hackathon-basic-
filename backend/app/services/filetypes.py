@@ -13,6 +13,7 @@ class Sniffed:
 ALLOWED: dict[str, set[str]] = {
     "dashcam": {"video"},
     "cctv": {"video"},
+    "other": {"video"},
     "witness_text": {"text"},
     "witness_pdf": {"pdf"},
     "sensor_csv": {"text"},

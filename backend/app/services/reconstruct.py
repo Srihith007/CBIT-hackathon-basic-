@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session
 from app.db import new_id
 from app.models import (Actor, ActorLink, Camera, Case, Contradiction, Corroboration, Event, EventSource, EventSummary, EvidenceFile,
                         ExtractedFrame, GapRecord, InvestigationFinding, ModelRun, ReconstructionScenario, SensorRecord, SensorSource,
-                        SourceEvent, Trajectory, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
+                        SourceAnnotation, SourceEvent, Trajectory, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
 from app.models.engine import ClockRecord, SyncEdge
 from app.config import get_settings
 from app.llm.featherless import FeatherlessClient
 from app.services import audit, engine_rules as rules, geometry, incident, sync
+from app.services.sources import annotation_edges
 
 ENGINE_VERSION = "1"
 TIME_WORDS = [
@@ -88,6 +89,11 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
               for c in db.execute(select(ClockRecord).where(ClockRecord.case_id == case.id)).scalars()]
     edges = [{"id": e.id, "a_evidence": e.a_evidence, "b_evidence": e.b_evidence, "offset_ms": e.offset_ms, "bound_ms": e.bound_ms, "basis": e.basis, "status": e.status}
              for e in db.execute(select(SyncEdge).where(SyncEdge.case_id == case.id)).scalars()]
+    ann_rows = db.execute(select(SourceAnnotation).where(SourceAnnotation.evidence_id.in_(list(media) or [""]))).scalars()
+    edges.extend(annotation_edges([
+        {"evidence_id": a.evidence_id, "clock_offset_ms": a.clock_offset_ms, "clock_offset_reference_id": a.clock_offset_reference_id}
+        for a in ann_rows if a.clock_offset_reference_id in media and a.evidence_id in media
+    ]))
     solved = sync.solve([{"id": i, "kind": e.kind} for i, e in media.items()], clocks, edges, reference=asm["reference"], edge_offsets=asm["edge_offsets"],
                         exclude_edges=set(asm["exclude_edges"]))
     lk = sync.lookup(solved)

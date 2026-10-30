@@ -14,6 +14,7 @@ from app.models.ops import AuditLog, LlmCall, ProcessingJob  # noqa: F401
 from app.models.reconstruction import (  # noqa: F401
     Actor,
     ActorLink,
+    SourceAnnotation,
     Annotation,
     Contradiction,
     Corroboration,
