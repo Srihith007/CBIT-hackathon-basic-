@@ -7,7 +7,7 @@ import { useCaseContext } from '../caseContext';
 
 vi.mock('../api', () => ({
   api: {
-    cases: vi.fn().mockResolvedValue({ items: [] }), createCase: vi.fn(), case: vi.fn(), upload: vi.fn(), setClock: vi.fn(), jobs: vi.fn(), evidence: vi.fn(),
+    cases: vi.fn().mockResolvedValue({ items: [] }), createCase: vi.fn(), case: vi.fn(), upload: vi.fn(), setClock: vi.fn(), patchSource: vi.fn().mockResolvedValue({}), jobs: vi.fn(), evidence: vi.fn(),
     buildScenario: vi.fn(), addWitness: vi.fn(), addStatement: vi.fn(), retryJob: vi.fn(),
   },
   ApiError: class extends Error {},
@@ -52,7 +52,7 @@ describe('guided flow: create investigation', () => {
 });
 
 describe('guided flow: upload with source metadata', () => {
-  it('shows every source field for each chosen video, with Other disabled because the backend cannot store it', async () => {
+  it('shows every source field for each chosen video, including Other, which is stored but not analysed', async () => {
     wrap('/new?title=Junction&designation=real');
     await create();
     pick('north.mp4');
@@ -60,7 +60,7 @@ describe('guided flow: upload with source metadata', () => {
     for (const label of ['Camera name', 'Camera type', 'Location (text)', 'Recording start', 'Recording end', 'Timezone', 'Clock offset (seconds)', 'Start certainty ± seconds']) {
       expect(within(group).getByLabelText(label)).toBeInTheDocument();
     }
-    expect(within(group).getByRole('option', { name: /Other/ })).toBeDisabled();
+    expect(within(group).getByRole('option', { name: /Other/ })).not.toBeDisabled();
   });
   it('declares the clock from start, timezone, offset and stated uncertainty, and sends the chosen camera kind', async () => {
     wrap('/new?title=Junction&designation=real');
@@ -77,7 +77,36 @@ describe('guided flow: upload with source metadata', () => {
     submit();
     await waitFor(() => expect(api.setClock).toHaveBeenCalled());
     expect(api.upload.mock.calls[0][2]).toBe('dashcam');
+    expect(api.patchSource).toHaveBeenCalledWith('ev_1', { display_name: null, camera_role: 'dashcam', location_text: null, recording_start: '2026-10-30T10:00:00.000Z', recording_end: null, timezone: 'UTC' });
     expect(api.setClock).toHaveBeenCalledWith('ev_1', { utc_zero: '2026-10-30T09:59:30.000Z', bound_ms: 2000, basis: 'declared_by_investigator', timezone: 'UTC', note: 'stated clock offset 30 s' });
+  });
+  it('stores camera name, type, location and window on the backend source and uploads Other as kind other', async () => {
+    wrap('/new?title=Junction&designation=real');
+    await create();
+    api.upload.mockResolvedValue({ duplicate: false, evidence: { id: 'ev_9' } });
+    api.jobs.mockResolvedValue({ items: [] }); api.evidence.mockResolvedValue({ items: [] });
+    pick('phone.mp4');
+    fireEvent.change(screen.getByLabelText('Camera name'), { target: { value: 'Shop camera' } });
+    fireEvent.change(screen.getByLabelText('Camera type'), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Location (text)'), { target: { value: 'Outside the pharmacy' } });
+    expect(screen.getByText(/not sent to vehicle detection or tracking/)).toBeInTheDocument();
+    submit();
+    await waitFor(() => expect(api.patchSource).toHaveBeenCalled());
+    expect(api.upload.mock.calls[0][2]).toBe('other');
+    expect(api.patchSource).toHaveBeenCalledWith('ev_9', expect.objectContaining({ display_name: 'Shop camera', camera_role: 'other', location_text: 'Outside the pharmacy', recording_start: null }));
+    expect(api.setClock).not.toHaveBeenCalled();
+  });
+  it('does not overwrite the stored details of a duplicate upload', async () => {
+    wrap('/new?title=Junction&designation=real');
+    await create();
+    api.upload.mockResolvedValue({ duplicate: true, evidence: { id: 'ev_1', original_filename: 'same.mp4' } });
+    api.jobs.mockResolvedValue({ items: [] }); api.evidence.mockResolvedValue({ items: [] });
+    pick('same.mp4');
+    fireEvent.change(screen.getByLabelText('Camera name'), { target: { value: 'Changed' } });
+    submit();
+    await waitFor(() => expect(api.upload).toHaveBeenCalled());
+    await screen.findByText(/Already in this case/);
+    expect(api.patchSource).not.toHaveBeenCalled();
   });
   it('does not invent an uncertainty: a start time without one blocks the upload', async () => {
     wrap('/new?title=Junction&designation=real');

@@ -1,11 +1,11 @@
 /** Source metadata an investigator states about one video: camera name and kind, location text, recording start and end, timezone and clock offset.
- *  Only the clock part (start, timezone, offset, uncertainty) maps to a backend endpoint today (PUT /evidence/{id}/clock). The rest is kept in this
- *  browser and labelled as such until the backend stores it (docs/FRONTEND_V2_BACKEND_NEEDS.md). */
+ *  Description fields go to PATCH /evidence/{id}/source (stored beside the immutable file). The clock part (start, timezone, stated offset,
+ *  uncertainty) also goes to PUT /evidence/{id}/clock, which is the only record that can place a source on a shared clock. */
 
 export const CAMERA_KINDS = [
   { value: 'cctv', label: 'CCTV (fixed)' },
   { value: 'dashcam', label: 'Dashcam (moving)' },
-  { value: 'other', label: 'Other (not supported by the backend yet)', disabled: true },
+  { value: 'other', label: 'Other (stored, not analysed)' },
 ];
 
 export const EMPTY_META = { camera_name: '', camera_kind: 'cctv', location_text: '', recording_start: '', recording_end: '', timezone: '', clock_offset_s: '', clock_bound_s: '' };
@@ -36,7 +36,7 @@ export function zonedToUtc(local, tz) {
 const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
 
 /** Errors keyed by field. Nothing is defaulted: a start time without a stated uncertainty is refused, because the backend would treat 0 as exact. */
-export function validateMeta(m, { durationMs } = {}) {
+export function validateMeta(m, { durationMs, clockTouched = true } = {}) {
   const e = {};
   if (m.recording_start && !m.timezone) e.timezone = 'Choose the timezone the camera clock was set to.';
   if (m.timezone && !isTimezone(m.timezone)) e.timezone = 'Not a valid IANA timezone, for example Asia/Kolkata or UTC.';
@@ -53,7 +53,7 @@ export function validateMeta(m, { durationMs } = {}) {
   }
   if (m.clock_offset_s !== '' && !Number.isFinite(num(m.clock_offset_s))) e.clock_offset_s = 'Enter a number of seconds.';
   if (m.clock_bound_s !== '' && !(Number.isFinite(num(m.clock_bound_s)) && num(m.clock_bound_s) >= 0)) e.clock_bound_s = 'Enter zero or more seconds.';
-  if (m.recording_start && m.clock_bound_s === '') e.clock_bound_s = 'State how certain the start time is (± seconds). It is not assumed.';
+  if (clockTouched && m.recording_start && m.clock_bound_s === '') e.clock_bound_s = 'State how certain the start time is (± seconds). It is not assumed.';
   return e;
 }
 
@@ -68,6 +68,41 @@ export function toClockBody(m) {
   return { utc_zero: utcZero.toISOString(), bound_ms: (num(m.clock_bound_s) || 0) * 1000, basis: 'declared_by_investigator', timezone: m.timezone, note: parts.join('; ') || null };
 }
 
-const key = (evidenceId) => `traceline.sourceMeta.${evidenceId}`;
-export const loadLocalMeta = (evidenceId) => { try { return JSON.parse(localStorage.getItem(key(evidenceId))); } catch { return null; } };
-export const saveLocalMeta = (evidenceId, m) => { try { localStorage.setItem(key(evidenceId), JSON.stringify(m)); } catch { /* storage unavailable */ } };
+/** Body for PATCH /evidence/{id}/source. Empty fields are sent as null so an edit can clear them. Instants are UTC; the timezone is kept as stated. */
+export function toSourceBody(m) {
+  const at = (v) => { const d = zonedToUtc(v, m.timezone); return d ? d.toISOString() : null; };
+  return {
+    display_name: m.camera_name.trim() || null,
+    camera_role: m.camera_kind || null,
+    location_text: m.location_text.trim() || null,
+    recording_start: m.recording_start ? at(m.recording_start) : null,
+    recording_end: m.recording_end ? at(m.recording_end) : null,
+    timezone: m.timezone || null,
+  };
+}
+
+/** UTC instant -> "YYYY-MM-DDTHH:mm:ss" wall time in `tz`, the inverse of zonedToUtc. */
+export function utcToZonedLocal(iso, tz) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime()) || !isTimezone(tz)) return '';
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+}
+
+/** Form values from a stored `evidence.source`. A stored start without a timezone is shown in UTC, which is what the instant is. */
+export function fromSource(ev) {
+  const s = ev.source || {};
+  const tz = s.timezone || (s.recording_start || s.recording_end ? 'UTC' : '');
+  return {
+    ...EMPTY_META,
+    camera_name: s.display_name || '',
+    camera_kind: s.camera_role || (ev.kind === 'dashcam' || ev.kind === 'cctv' ? ev.kind : 'cctv'),
+    location_text: s.location_text || '',
+    recording_start: s.recording_start ? utcToZonedLocal(s.recording_start, tz) : '',
+    recording_end: s.recording_end ? utcToZonedLocal(s.recording_end, tz) : '',
+    timezone: tz,
+  };
+}
+
+const CLOCK_KEYS = ['recording_start', 'timezone', 'clock_offset_s', 'clock_bound_s'];
+export const clockTouched = (initial, m) => CLOCK_KEYS.some((k) => (initial[k] ?? '') !== (m[k] ?? ''));

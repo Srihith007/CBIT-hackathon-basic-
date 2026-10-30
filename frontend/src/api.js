@@ -58,6 +58,7 @@ export const api = {
   createCase: (body) => req('/cases', { method: 'POST', body: JSON.stringify(body) }),
   patchCase: (id, body) => req(`/cases/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   sync: (id) => req(`/cases/${id}/sync`),
+  patchSource: (evId, body) => req(`/evidence/${evId}/source`, { method: 'PATCH', body: JSON.stringify(body) }),
   setClock: (evId, body) => req(`/evidence/${evId}/clock`, { method: 'PUT', body: JSON.stringify(body) }),
   upload: async (caseId, file, kind, synthetic) => {
     const fd = new FormData();

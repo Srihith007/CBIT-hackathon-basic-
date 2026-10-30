@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Badge, Button, Card, Field, Input, Textarea } from '../ui-kit';
 import { api } from '../api';
 import SourceMetaFields from './SourceMetaFields';
-import { EMPTY_META, saveLocalMeta, toClockBody, validateMeta } from '../lib/sourceMeta';
+import { EMPTY_META, toClockBody, toSourceBody, validateMeta } from '../lib/sourceMeta';
 
 const guessKind = (name) => (/dash/i.test(name) ? 'dashcam' : 'cctv');
 
@@ -43,10 +43,10 @@ export default function EvidenceUploader({ caseId, designation, onDone, submitLa
         const r = await api.upload(caseId, f.file, f.meta.camera_kind, synthetic);
         const ev = r.evidence;
         uploaded.push({ evidence: ev, duplicate: !!r.duplicate });
-        if (r.duplicate) say(`${f.file.name} is already in this case. It was not added again.`);
+        if (r.duplicate) { say(`${f.file.name} is already in this case. It was not added again and its stored details were left as they are.`); continue; }
+        await api.patchSource(ev.id, toSourceBody(f.meta));
         const body = toClockBody(f.meta);
-        saveLocalMeta(ev.id, f.meta);
-        if (body) { await api.setClock(ev.id, body); say(`Clock declared for ${f.file.name}`); }
+        if (body) { await api.setClock(ev.id, body); say(`Source details and clock saved for ${f.file.name}`); }
       }
       if (sensor) { say('Uploading sensor file…'); const r = await api.upload(caseId, sensor, 'sensor_csv', synthetic); uploaded.push({ evidence: r.evidence, duplicate: !!r.duplicate }); }
       if (statement.trim()) {

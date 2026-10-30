@@ -14,6 +14,7 @@ export default function SourceMetaFields({ value, onChange, errors = {}, disable
           {CAMERA_KINDS.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
         </Select>
       </Field>
+      {value.camera_kind === 'other' && <p className="t-caption text-fg-3 sm:col-span-2">An "Other" video is stored with its hash and shown in the case, but is not sent to vehicle detection or tracking.</p>}
       <Field label="Location (text)" className="sm:col-span-2" hint="Free text as you know it. It is not geocoded and no map is drawn."><Input id={`${idPrefix}-loc`} value={value.location_text} onChange={set('location_text')} disabled={disabled} placeholder="e.g. Corner of Main St and 4th Ave, facing east" /></Field>
       <Field label="Recording start" error={errors.recording_start}><Input id={`${idPrefix}-start`} type="datetime-local" step="1" value={value.recording_start} onChange={set('recording_start')} disabled={disabled} /></Field>
       <Field label="Recording end" error={errors.recording_end}><Input id={`${idPrefix}-end`} type="datetime-local" step="1" value={value.recording_end} onChange={set('recording_end')} disabled={disabled} /></Field>

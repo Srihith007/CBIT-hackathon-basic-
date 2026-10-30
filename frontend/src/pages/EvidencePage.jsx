@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, Card, DataTable, EmptyState, ErrorState, LoadingState, Modal, PageHeader, SectionHeader, Segmented, useToast } from '../ui-kit';
+import { Alert, Badge, Button, Card, DataTable, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, SectionHeader, Segmented, Select, useToast } from '../ui-kit';
 import { FileText, FileVideo, Gauge, Layers, Play } from 'lucide-react';
 import Shell from '../layout';
 import CaseBanner from '../components/CaseBanner';
@@ -12,11 +12,11 @@ import { Statement } from '../components/Evidence';
 import { api } from '../api';
 import { useCaseContext } from '../caseContext';
 import { effectiveDesignation } from '../lib/overview';
-import { EMPTY_META, loadLocalMeta, saveLocalMeta, toClockBody, validateMeta } from '../lib/sourceMeta';
+import { clockTouched, fromSource, toClockBody, toSourceBody, validateMeta } from '../lib/sourceMeta';
 
 const VIEW_KEY = 'traceline.evidenceView';
 const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'grid'; } catch { return 'grid'; } };
-const isVideo = (e) => e.kind === 'cctv' || e.kind === 'dashcam';
+const isVideo = (e) => e.kind === 'cctv' || e.kind === 'dashcam' || e.kind === 'other';
 const KIND_ICON = { cctv: FileVideo, dashcam: FileVideo, sensor_csv: Gauge };
 const bytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
 const NA = <span className="text-fg-3">Not established</span>;
@@ -44,9 +44,11 @@ function Thumb({ e }) {
     : <div className="flex aspect-video w-full items-center justify-center rounded-md border border-line bg-surface-2 text-fg-3" aria-label="No preview available"><Icon className="h-6 w-6" aria-hidden /><span className="t-caption ml-2">No preview</span></div>;
 }
 
-function Detail({ e, jobs, sync, videoCount, onPreview, onSaved }) {
+function Detail({ e, jobs, sync, videoCount, others, onPreview, onSaved }) {
   const toast = useToast();
-  const [meta, setMeta] = useState(() => ({ ...EMPTY_META, camera_kind: isVideo(e) ? e.kind : 'cctv', ...(loadLocalMeta(e.id) || {}) }));
+  const initial = useMemo(() => fromSource(e), [e]);
+  const [meta, setMeta] = useState(initial);
+  const [rel, setRel] = useState({ ref: e.source?.clock_offset_reference_id || '', seconds: e.source?.clock_offset_ms != null ? String(e.source.clock_offset_ms / 1000) : '' });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const st = syncState(sync, e.id, videoCount);
@@ -54,17 +56,22 @@ function Detail({ e, jobs, sync, videoCount, onPreview, onSaved }) {
   const v = e.video;
   const save = async (ev) => {
     ev.preventDefault();
-    const errs = validateMeta(meta, { durationMs: v?.duration_ms });
+    const touched = clockTouched(initial, meta);
+    const errs = validateMeta(meta, { durationMs: v?.duration_ms, clockTouched: touched });
+    const secs = rel.seconds.trim();
+    if (rel.ref && secs === '') errs.offset = 'Enter the offset in seconds, or clear the reference.';
+    if (!rel.ref && secs !== '') errs.offset = 'Choose which source the offset is measured against.';
+    if (secs !== '' && !Number.isFinite(Number(secs))) errs.offset = 'Enter a number of seconds.';
     setErrors(errs);
     if (Object.keys(errs).length) return;
     setBusy(true);
     try {
-      const body = toClockBody(meta);
+      const body = touched ? toClockBody(meta) : null;
+      await api.patchSource(e.id, { ...toSourceBody(meta), clock_offset_reference_id: rel.ref || null, clock_offset_ms: rel.ref ? Math.round(Number(secs) * 1000) : null });
       if (body) await api.setClock(e.id, body);
-      saveLocalMeta(e.id, meta);
-      toast({ title: body ? 'Source details saved. Clock declared.' : 'Source details saved in this browser.', type: 'success' });
+      toast({ title: body ? 'Source details saved. Clock declared.' : 'Source details saved.', type: 'success' });
       onSaved();
-    } catch (x) { toast({ title: 'Could not save the clock', description: x.message, type: 'error' }); } finally { setBusy(false); }
+    } catch (x) { toast({ title: 'Could not save the source details', description: x.message, type: 'error' }); } finally { setBusy(false); }
   };
   return (
     <Card as="section" aria-label={`Source ${e.original_filename}`} className="space-y-5">
@@ -82,6 +89,10 @@ function Detail({ e, jobs, sync, videoCount, onPreview, onSaved }) {
         </div>
         <dl className="t-small grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5" aria-label="Metadata">
           <dt className="text-fg-3">Source id</dt><dd className="mono break-all text-fg-2">{e.id}</dd>
+          <dt className="text-fg-3">Camera name</dt><dd className="text-fg-2">{e.source?.display_name || NA}</dd>
+          <dt className="text-fg-3">Camera type</dt><dd className="text-fg-2">{e.source?.camera_role || NA}</dd>
+          <dt className="text-fg-3">Location (as stated)</dt><dd className="text-fg-2">{e.source?.location_text || NA}</dd>
+          <dt className="text-fg-3">Recording window (as stated)</dt><dd className="text-fg-2">{e.source?.recording_start ? `${e.source.recording_start}${e.source.recording_end ? ` → ${e.source.recording_end}` : ''}${e.source.timezone ? ` · ${e.source.timezone}` : ''}` : NA}</dd>
           <dt className="text-fg-3">Original file</dt><dd className="break-all text-fg-2">{e.original_filename}</dd>
           <dt className="text-fg-3">Size</dt><dd className="text-fg-2">{bytes(e.size_bytes)}</dd>
           <dt className="text-fg-3">SHA-256</dt><dd className="mono break-all text-fg-2" title={e.sha256}>{e.sha256}</dd>
@@ -122,9 +133,23 @@ function Detail({ e, jobs, sync, videoCount, onPreview, onSaved }) {
         <form onSubmit={save} aria-label="Edit source details" className="space-y-3">
           <SectionHeader title="Source details" description="Edit at any time. Original bytes are never changed." />
           <Alert variant="info" title="What is stored where">
-            Recording start, timezone, offset and uncertainty are sent to the backend as a declared clock. Camera name, type, location text and recording end are kept in this browser until the backend stores them (see docs/FRONTEND_V2_BACKEND_NEEDS.md).
+            Name, camera type, location text and the recording window are stored beside the file. The file, its name and its hash do not change. A start time, timezone, clock offset and uncertainty are also declared as a clock, and a declared clock is trusted when sources are placed on one timeline. Changes reach the reconstruction when it is next rebuilt.
           </Alert>
           <SourceMetaFields value={meta} onChange={setMeta} errors={errors} idPrefix={`src-${e.id}`} filename={e.original_filename} />
+          {others.length > 0 && (
+            <fieldset className="grid gap-3 sm:grid-cols-2">
+              <legend className="t-small mb-1 font-medium text-fg">Offset to another source</legend>
+              <Field label="Measured against" hint="Optional.">
+                <Select id={`rel-${e.id}`} value={rel.ref} onChange={(x) => setRel({ ...rel, ref: x.target.value })}>
+                  <option value="">None</option>
+                  {others.map((o) => <option key={o.id} value={o.id}>{o.source?.display_name || o.original_filename}</option>)}
+                </Select>
+              </Field>
+              <Field label="Offset (seconds)" error={errors.offset} hint="Time in this source = time in the other source + offset. Applied as a declared relation when the reconstruction is rebuilt.">
+                <Input id={`rel-s-${e.id}`} type="number" step="any" value={rel.seconds} onChange={(x) => setRel({ ...rel, seconds: x.target.value })} />
+              </Field>
+            </fieldset>
+          )}
           <Button type="submit" variant="primary" loading={busy}>Save source details</Button>
         </form>
       )}
@@ -212,7 +237,7 @@ export default function EvidencePage() {
           ) : (
             <Card padded={false} className="mb-6 overflow-x-auto"><DataTable caption="Sources" rows={sources} columns={cols} onRowClick={(r) => setPick(r.e.id)} initialSort={null} renderMobileRow={(r) => <button type="button" className="w-full p-4 text-left" onClick={() => setPick(r.e.id)}>{r.e.original_filename}</button>} /></Card>
           )}
-          {selected && <Detail key={selected.id} e={selected} jobs={jobs} sync={sync} videoCount={videoCount} onPreview={setPreview} onSaved={load} />}
+          {selected && <Detail key={selected.id} e={selected} others={ev.filter((o) => o.id !== selected.id && isVideo(o))} jobs={jobs} sync={sync} videoCount={videoCount} onPreview={setPreview} onSaved={load} />}
         </>
       )}
 

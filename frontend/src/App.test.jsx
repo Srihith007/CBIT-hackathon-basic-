@@ -10,7 +10,7 @@ vi.mock('./api', () => ({
   api: {
     cases: vi.fn(), case: vi.fn(), dashboard: vi.fn(), jobs: vi.fn(), findings: vi.fn(), evidence: vi.fn(), sync: vi.fn(), witnesses: vi.fn(), statements: vi.fn(),
     frames: vi.fn(), patchCase: vi.fn(), reports: vi.fn(), reportById: vi.fn(), reportMd: vi.fn(), report: vi.fn(), scenarios: vi.fn(), actors: vi.fn(),
-    streamUrl: (id) => `/api/v1/evidence/${id}/stream`, pdfUrl: (id) => `/api/v1/reports/${id}/pdf`, setClock: vi.fn(),
+    streamUrl: (id) => `/api/v1/evidence/${id}/stream`, pdfUrl: (id) => `/api/v1/reports/${id}/pdf`, setClock: vi.fn(), patchSource: vi.fn(),
   },
   ApiError: class extends Error {},
 }));
@@ -138,8 +138,9 @@ describe('evidence page', () => {
     expect(screen.getByText('No witness statement has been added to this case.')).toBeInTheDocument();
     expect(screen.getByText('No sensor file has been uploaded to this case.')).toBeInTheDocument();
   });
-  it('saving a start time declares the clock; the camera name stays in this browser', async () => {
+  it('saving a start time stores the source details and declares the clock', async () => {
     api.setClock.mockResolvedValue({});
+    api.patchSource.mockResolvedValue({});
     app('/evidence/case_r');
     const form = await screen.findByRole('form', { name: 'Edit source details' });
     fireEvent.change(within(form).getByLabelText('Camera name'), { target: { value: 'North cam' } });
@@ -149,7 +150,43 @@ describe('evidence page', () => {
     expect(within(form).getByTestId('clock-preview')).toHaveTextContent('2026-10-30T04:30:00.000Z');
     fireEvent.click(within(form).getByRole('button', { name: 'Save source details' }));
     await waitFor(() => expect(api.setClock).toHaveBeenCalledWith('ev_1', expect.objectContaining({ utc_zero: '2026-10-30T04:30:00.000Z', bound_ms: 5000, timezone: 'Asia/Kolkata', basis: 'declared_by_investigator' })));
-    expect(JSON.parse(localStorage.getItem('traceline.sourceMeta.ev_1')).camera_name).toBe('North cam');
+    expect(api.patchSource).toHaveBeenCalledWith('ev_1', expect.objectContaining({ display_name: 'North cam', recording_start: '2026-10-30T04:30:00.000Z', timezone: 'Asia/Kolkata' }));
+  });
+});
+
+describe('evidence page: stored source details', () => {
+  const stored = { ...video, source: { source_id: 'ev_1', display_name: 'North cam', camera_role: 'cctv', location_text: 'Main St', recording_start: '2026-10-30T04:30:00Z', recording_end: null, timezone: 'Asia/Kolkata', clock_offset_ms: null, clock_offset_reference_id: null } };
+  it('shows the stored camera name, type, location and window, and fills the form with them in the stated timezone', async () => {
+    api.evidence.mockResolvedValue({ items: [stored] });
+    app('/evidence/case_r');
+    const form = await screen.findByRole('form', { name: 'Edit source details' });
+    expect(screen.getByLabelText('Metadata')).toHaveTextContent('Main St');
+    expect(within(form).getByLabelText('Camera name')).toHaveValue('North cam');
+    expect(within(form).getByLabelText('Recording start').value).toMatch(/^2026-10-30T10:00/);
+    expect(within(form).getByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
+  });
+  it('saving a changed name does not re-declare the clock', async () => {
+    api.evidence.mockResolvedValue({ items: [stored] });
+    api.patchSource.mockResolvedValue({});
+    app('/evidence/case_r');
+    const form = await screen.findByRole('form', { name: 'Edit source details' });
+    fireEvent.change(within(form).getByLabelText('Camera name'), { target: { value: 'North cam 2' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save source details' }));
+    await waitFor(() => expect(api.patchSource).toHaveBeenCalled());
+    expect(api.patchSource.mock.calls[0][1]).toMatchObject({ display_name: 'North cam 2', recording_start: '2026-10-30T04:30:00.000Z' });
+    expect(api.setClock).not.toHaveBeenCalled();
+  });
+  it('offers an offset against another source and sends it in milliseconds', async () => {
+    api.evidence.mockResolvedValue({ items: [stored, { ...video, id: 'ev_2', original_filename: 'south.mp4', sha256: 'b'.repeat(64) }] });
+    api.patchSource.mockResolvedValue({});
+    app('/evidence/case_r');
+    const form = await screen.findByRole('form', { name: 'Edit source details' });
+    fireEvent.change(within(form).getByLabelText('Measured against'), { target: { value: 'ev_2' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save source details' }));
+    expect(await within(form).findByText(/Enter the offset in seconds/)).toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText(/^Offset \(seconds\)/), { target: { value: '-1.5' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save source details' }));
+    await waitFor(() => expect(api.patchSource).toHaveBeenCalledWith('ev_1', expect.objectContaining({ clock_offset_reference_id: 'ev_2', clock_offset_ms: -1500 })));
   });
 });
 
