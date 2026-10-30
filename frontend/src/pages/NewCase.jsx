@@ -33,7 +33,7 @@ export default function NewCase() {
       }
       for (;;) {
         const jobs = (await api.jobs(c.id)).items;
-        const active = jobs.filter((j) => ['pending', 'running', 'retrying'].includes(j.status));
+        const active = jobs.filter((j) => ['pending', 'validating', 'processing'].includes(j.status));
         const failed = jobs.filter((j) => j.status === 'failed');
         if (failed.length) throw new Error(`${STAGE[failed[0].stage] || failed[0].stage} failed: ${failed[0].error || 'see job log'}`);
         if (!active.length && jobs.some((j) => j.stage === 'track' && j.status === 'completed')) break;
