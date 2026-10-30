@@ -1,63 +1,90 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pause, Play, StepBack, StepForward } from 'lucide-react';
-import { Button, Card, IconButton, Segmented } from '../ui-kit';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FastForward, Maximize2, Pause, Play, Rewind, StepBack, StepForward } from 'lucide-react';
+import { Badge, Button, IconButton, Segmented } from '../ui-kit';
 import { api } from '../api';
 import { useWorkspace } from '../store';
-import { ACTOR_COLORS, clock } from '../fmt';
+import { ACTOR_COLORS } from '../fmt';
+import { containTransform, latestSample, mapBox } from '../lib/overlay';
+import Scrubber from './Scrubber';
+import TimeReadout from './TimeReadout';
 
-/** One <video> per synchronized source. The first synchronized video is the clock while playing; the others follow it through the
- *  recorded offsets (media time = case time + shift). A source with no recorded clock relation is shown but never slaved. */
-export default function Player({ videos, shifts, trackActors, actorLabels }) {
+const SEEK_TIMEOUT_MS = 1500;
+
+/** Resolve when the element has finished seeking to `seconds` (or after a timeout, so a stuck decoder never blocks the UI). */
+function seekElement(el, seconds) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; el.removeEventListener('seeked', finish); resolve(); } };
+    el.addEventListener('seeked', finish);
+    setTimeout(finish, SEEK_TIMEOUT_MS);
+    el.currentTime = Math.max(0, seconds);
+  });
+}
+
+/** The video element owns the clock while playing. One rAF loop in this component copies the master's time into the store (case ms);
+ *  secondary sources follow through the recorded clock offsets: media time = case time + shift. A source with no clock relation
+ *  (no entry in `shifts`) is never slaved.
+ *  Seeking is latest-wins: each request has an id; only the newest request's completion is acknowledged as settled. */
+export default function Player({ videos, shifts, trackActors, actorLabels, range, events, onSelectEvent }) {
   const refs = useRef({});
+  const box = useRef(null);
   const raf = useRef(0);
-  const { playing, rate, currentMs, seekRequest, overlays, setPlaying, setTime, setRate, seek } = useWorkspace();
-  const master = videos.find((v) => shifts[v.id] != null);
-  const lastSeek = useRef(0);
-  const lastWrite = useRef(0);
+  const playing = useWorkspace((s) => s.playing);
+  const rate = useWorkspace((s) => s.rate);
+  const seekId = useWorkspace((s) => s.seek.latest);
+  const settled = useWorkspace((s) => s.seekSettled);
+  const primaryId = useWorkspace((s) => s.primaryVideoId) || videos[0]?.id;
+  const { setPlaying, setRate, setTime, requestSeek, ackSeek, setPrimaryVideo } = useWorkspace.getState();
 
-  const toMedia = (v, caseMs) => (shifts[v.id] == null ? null : caseMs + shifts[v.id]);
+  const primary = videos.find((v) => v.id === primaryId) || videos[0];
+  const syncedMaster = shifts[primary?.id] != null ? primary : videos.find((v) => shifts[v.id] != null);
+  const master = syncedMaster || primary;
+  const shiftOf = useCallback((v) => (shifts[v.id] != null ? shifts[v.id] : v.id === master?.id ? 0 : null), [shifts, master?.id]);
+  const mediaAt = (v, caseMs) => { const s = shiftOf(v); return s == null ? null : caseMs + s; };
+  const inRange = (v, m) => m != null && m >= 0 && m <= (v.video.duration_ms ?? 0);
+  const fps = primary?.video.fps_measured || primary?.video.fps_nominal || 25;
 
-  // seek requests: latest wins
+  // ---- latest-wins seek: runs when a new request id appears
   useEffect(() => {
-    if (seekRequest.id === lastSeek.current) return;
-    lastSeek.current = seekRequest.id;
-    videos.forEach((v) => {
+    if (!seekId) return;
+    const id = seekId;
+    const ms = useWorkspace.getState().currentMs;
+    Promise.all(videos.map((v) => {
       const el = refs.current[v.id];
-      const m = toMedia(v, seekRequest.ms);
-      if (el && m != null) el.currentTime = Math.max(0, m / 1000);
-    });
-  }, [seekRequest, videos, shifts]);
+      const m = mediaAt(v, ms);
+      return el && inRange(v, m) ? seekElement(el, m / 1000) : Promise.resolve();
+    })).then(() => ackSeek(id));
+  }, [seekId]);
 
+  // ---- play / pause / rate
   useEffect(() => {
+    const ms = useWorkspace.getState().currentMs;
     videos.forEach((v) => {
       const el = refs.current[v.id];
       if (!el) return;
       el.playbackRate = rate;
-      const m = toMedia(v, currentMs);
-      const inside = m != null && m >= 0 && m <= (v.video.duration_ms ?? 0);
-      if (playing && inside) el.play().catch(() => {});
-      else el.pause();
+      const m = mediaAt(v, ms);
+      if (playing && inRange(v, m)) el.play().catch(() => {}); else el.pause();
     });
   }, [playing, rate]);
 
-  // the master video is the clock while playing
+  // ---- the clock
   useEffect(() => {
     if (!playing || !master) return undefined;
-    const tick = (now) => {
+    const tick = () => {
       const el = refs.current[master.id];
       if (el) {
-        const caseMs = el.currentTime * 1000 - shifts[master.id];
-        if (now - lastWrite.current > 33) { lastWrite.current = now; setTime(caseMs); }
+        const caseMs = el.currentTime * 1000 - (shiftOf(master) ?? 0);
+        setTime(caseMs);
         videos.forEach((v) => {
           const s = refs.current[v.id];
-          const m = toMedia(v, caseMs);
+          const m = mediaAt(v, caseMs);
           if (!s || v.id === master.id || m == null) return;
-          const inside = m >= 0 && m <= v.video.duration_ms;
-          if (!inside) { if (!s.paused) s.pause(); return; }
+          if (!inRange(v, m)) { if (!s.paused) s.pause(); return; }
           if (Math.abs(s.currentTime * 1000 - m) > 200) s.currentTime = m / 1000;
           if (s.paused) s.play().catch(() => {});
         });
-        if (el.ended) setPlaying(false);
+        if (el.ended) { setPlaying(false); return; }
       }
       raf.current = requestAnimationFrame(tick);
     };
@@ -65,119 +92,160 @@ export default function Player({ videos, shifts, trackActors, actorLabels }) {
     return () => cancelAnimationFrame(raf.current);
   }, [playing, master?.id]);
 
-  // paused: keep slaves on the current time (e.g. after a click on the timeline)
-  useEffect(() => {
-    if (playing) return;
-    videos.forEach((v) => {
-      const el = refs.current[v.id];
-      const m = toMedia(v, currentMs);
-      if (el && m != null && Math.abs(el.currentTime * 1000 - m) > 80) el.currentTime = Math.max(0, m / 1000);
-    });
-  }, [currentMs, playing]);
-
-  const step = useCallback((dir, big) => { setPlaying(false); seek(currentMs + dir * (big ? 1000 : 200)); }, [currentMs]);
+  const clamp = (ms) => Math.min(Math.max(ms, range[0]), range[1]);
+  const jump = useCallback((deltaMs) => { setPlaying(false); requestSeek(clamp(useWorkspace.getState().currentMs + deltaMs)); }, [range]);
+  const frameMs = 1000 / fps;
+  const fullscreen = () => { const el = box.current?.querySelector('[data-primary]'); if (el?.requestFullscreen) el.requestFullscreen().catch(() => {}); };
 
   useEffect(() => {
     const onKey = (e) => {
       if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
-      if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
-      else if (e.key === 'ArrowRight') step(1, e.shiftKey);
-      else if (e.key === 'ArrowLeft') step(-1, e.shiftKey);
-      else if (e.key === 'ArrowUp') setRate(Math.min(rate * 2, 2));
-      else if (e.key === 'ArrowDown') setRate(Math.max(rate / 2, 0.25));
+      if (e.code === 'Space') { e.preventDefault(); setPlaying(!useWorkspace.getState().playing); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); jump(e.shiftKey ? 1000 : frameMs); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -1000 : -frameMs); }
+      else if (e.key === 'ArrowUp') setRate(Math.min(useWorkspace.getState().rate * 2, 2));
+      else if (e.key === 'ArrowDown') setRate(Math.max(useWorkspace.getState().rate / 2, 0.25));
+      else if (e.key === 'f') fullscreen();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [playing, rate, step]);
+  }, [jump, frameMs]);
+
+  const others = videos.filter((v) => v.id !== primary?.id);
+  const mediaMap = useMemo(() => (ms) => (primary && shiftOf(primary) != null ? ms + shiftOf(primary) : null), [primary?.id, shifts]);
+  if (!primary) return <p className="t-small text-fg-3">No playable video in this case yet.</p>;
 
   return (
-    <div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {videos.map((v) => (
-          <VideoTile key={v.id} v={v} setRef={(el) => { refs.current[v.id] = el; }} getEl={() => refs.current[v.id]} shift={shifts[v.id]} caseMs={currentMs}
-                     overlays={overlays} trackActors={trackActors} actorLabels={actorLabels} isMaster={master?.id === v.id} />
-        ))}
+    <div ref={box}>
+      <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_auto]">
+        <Tile key={primary.id} v={primary} primary setRef={(el) => { refs.current[primary.id] = el; }} shift={shiftOf(primary)} trackActors={trackActors} actorLabels={actorLabels} isClock={master?.id === primary.id} />
+        {others.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 2xl:w-56 2xl:grid-cols-1 2xl:content-start">
+            {others.map((v) => (
+              <Tile key={v.id} v={v} setRef={(el) => { refs.current[v.id] = el; }} shift={shiftOf(v)} trackActors={trackActors} actorLabels={actorLabels} onMakePrimary={() => setPrimaryVideo(v.id)} isClock={master?.id === v.id} />
+            ))}
+          </div>
+        )}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="primary" icon={playing ? Pause : Play} onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? 'Pause' : 'Play'}</Button>
-        <IconButton icon={StepBack} label="Back 0.2 s" variant="outline" size="sm" onClick={() => step(-1)} />
-        <IconButton icon={StepForward} label="Forward 0.2 s" variant="outline" size="sm" onClick={() => step(1)} />
-        <span className="mono t-small ml-2" aria-label="Case time">case {clock(currentMs)}</span>
-        <Segmented className="ml-auto" size="sm" label="Playback speed" value={rate} onChange={(v) => setRate(Number(v))} options={[0.25, 0.5, 1, 2].map((r) => ({ id: r, label: `${r}×` }))} />
+
+      <div className="mt-3 space-y-2">
+        <Scrubber range={range} events={events} onSeek={(ms) => { setPlaying(false); requestSeek(ms); }} onSelect={onSelectEvent} />
+        <div className="flex flex-wrap items-center gap-2">
+          <IconButton icon={Rewind} label="Back 1 s" variant="outline" size="sm" onClick={() => jump(-1000)} />
+          <IconButton icon={StepBack} label="Previous frame" variant="outline" size="sm" onClick={() => jump(-frameMs)} />
+          <Button size="sm" variant="primary" icon={playing ? Pause : Play} onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? 'Pause' : 'Play'}</Button>
+          <IconButton icon={StepForward} label="Next frame" variant="outline" size="sm" onClick={() => jump(frameMs)} />
+          <IconButton icon={FastForward} label="Forward 1 s" variant="outline" size="sm" onClick={() => jump(1000)} />
+          <div className="ml-1 flex items-center gap-3">
+            <TimeReadout label="case" />
+            <TimeReadout label="media" map={mediaMap} className="text-fg-3" />
+            {!settled && <span className="t-caption text-fg-3" role="status">seeking…</span>}
+          </div>
+          <Segmented className="ml-auto" size="sm" label="Playback speed" value={rate} onChange={(v) => setRate(Number(v))} options={[0.25, 0.5, 1, 2].map((r) => ({ id: r, label: `${r}×` }))} />
+          <IconButton icon={Maximize2} label="Fullscreen (f)" variant="outline" size="sm" onClick={fullscreen} />
+        </div>
+        <p className="t-caption text-fg-3">Space play/pause · ←/→ one frame ({frameMs.toFixed(1)} ms), Shift 1 s · ↑/↓ speed · f fullscreen. Frame step is the primary video's measured frame period.</p>
       </div>
-      <p className="t-caption mt-2 text-fg-3">Space play/pause · ←/→ 0.2 s (Shift 1 s) · ↑/↓ speed. The first synchronized video is the clock; others follow through the recorded offsets.</p>
     </div>
   );
 }
 
-function VideoTile({ v, setRef, getEl, shift, caseMs, overlays, trackActors, actorLabels, isMaster }) {
+function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrimary, isClock }) {
   const canvas = useRef(null);
-  const cache = useRef({ from: -1, to: -1, items: [] });
-  const media = shift == null ? null : caseMs + shift;
-  const inside = media != null && media >= 0 && media <= v.video.duration_ms;
+  const video = useRef(null);
+  const cache = useRef({ win: -1, items: [] });
+  const raf = useRef(0);
+  const overlays = useWorkspace((s) => s.overlays);
+  const selectedActor = useWorkspace((s) => s.selectedActorId);
+  const [windowKey, setWindowKey] = useState(-1);
 
-  // overlays are fetched in 10 s windows of media time
+  // the media window we need overlays for follows the playhead in 10 s blocks (fetched from the API; never generated here)
   useEffect(() => {
-    if (!inside) return;
-    const c = cache.current;
-    if (media >= c.from && media < c.to) return;
-    const from = Math.floor(media / 10000) * 10000;
-    c.from = from; c.to = from + 10000;
-    api.overlays(v.id, from, from + 10000).then((r) => { if (cache.current === c) c.items = r.items; }).catch(() => { c.items = []; });
-  }, [Math.floor((media ?? 0) / 10000), inside]);
-
-  useEffect(() => {
-    const cv = canvas.current;
-    const el = getEl();
-    if (!cv || !el) return undefined;
-    let id;
-    const draw = () => {
-      const ctx = cv.getContext('2d');
-      const w = (cv.width = cv.clientWidth), h = (cv.height = cv.clientHeight);
-      ctx.clearRect(0, 0, w, h);
-      if (overlays.boxes && el.videoWidth) {
-        const t = el.currentTime * 1000;
-        const items = cache.current.items;
-        let best = null;
-        for (const it of items) if (it.time_ms <= t + 20 && (!best || it.time_ms > best.time_ms)) best = it;
-        if (best && t - best.time_ms < 350) {
-          const sc = Math.min(w / el.videoWidth, h / el.videoHeight);
-          const ox = (w - el.videoWidth * sc) / 2, oy = (h - el.videoHeight * sc) / 2;
-          best.boxes.forEach((b) => {
-            const [x1, y1, x2, y2] = b.bbox;
-            const actor = trackActors[`${v.id}:${b.track_id}`];
-            const color = actor ? ACTOR_COLORS[actor.index % ACTOR_COLORS.length] : '#94a3b8';
-            ctx.strokeStyle = color; ctx.lineWidth = 2;
-            ctx.setLineDash(b.backfilled ? [4, 3] : []);
-            ctx.strokeRect(ox + x1 * sc, oy + y1 * sc, (x2 - x1) * sc, (y2 - y1) * sc);
-            if (overlays.ids) {
-              ctx.setLineDash([]); ctx.fillStyle = color; ctx.font = '11px ui-monospace, monospace';
-              const txt = `${actor ? actorLabels[actor.id] : `${b.class} #${b.track_id ?? '?'}`} ${Math.round(b.confidence * 100)}%`;
-              ctx.fillText(txt, Math.min(ox + x1 * sc, w - ctx.measureText(txt).width - 2), Math.max(12, oy + y1 * sc - 4));
-            }
-          });
-        }
-      }
-      id = requestAnimationFrame(draw);
+    const check = (ms) => {
+      if (shift == null) return;
+      const m = ms + shift;
+      if (m < 0 || m > v.video.duration_ms) return;
+      const w = Math.floor(m / 10_000);
+      if (w === cache.current.win) return;
+      cache.current.win = w;
+      const from = w * 10_000;
+      api.overlays(v.id, from, from + 10_000).then((r) => {
+        if (cache.current.win !== w) return;
+        cache.current.items = [...cache.current.items.filter((i) => i.time_ms < from || i.time_ms >= from + 10_000), ...r.items];
+        setWindowKey(w);
+      }).catch(() => {});
     };
-    id = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(id);
-  }, [overlays, trackActors, actorLabels]);
+    check(useWorkspace.getState().currentMs);
+    return useWorkspace.subscribe((s, p) => { if (s.currentMs !== p.currentMs) check(s.currentMs); });
+  }, [shift, v.id]);
 
+  const draw = useCallback(() => {
+    const cv = canvas.current;
+    const el = video.current;
+    if (!cv || !el) return;
+    const w = (cv.width = cv.clientWidth);
+    const h = (cv.height = cv.clientHeight);
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    if (!overlays.boxes || !el.videoWidth) return;
+    const sample = latestSample(cache.current.items, el.currentTime * 1000);
+    if (!sample) return;
+    const tf = containTransform(el.videoWidth, el.videoHeight, w, h);
+    sample.boxes.forEach((b) => {
+      const r = mapBox(b.bbox, tf);
+      const actor = trackActors[`${v.id}:${b.track_id}`];
+      const color = actor ? ACTOR_COLORS[actor.index % ACTOR_COLORS.length] : '#94a3b8';
+      const dim = selectedActor && (!actor || actor.id !== selectedActor);
+      ctx.globalAlpha = dim ? 0.35 : 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = selectedActor && actor?.id === selectedActor ? 3.5 : 2;
+      ctx.setLineDash(b.backfilled ? [4, 3] : []);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      if (overlays.ids) {
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = '11px ui-monospace, monospace';
+        const txt = `${actor ? actorLabels[actor.id] : `${b.class} #${b.track_id ?? '?'}`} ${Math.round(b.confidence * 100)}%`;
+        ctx.fillText(txt, Math.min(r.x, w - ctx.measureText(txt).width - 2), Math.max(12, r.y - 4));
+      }
+      ctx.globalAlpha = 1;
+    });
+  }, [overlays, selectedActor, trackActors, actorLabels, v.id]);
+
+  // redraw on clock changes (coalesced to one frame), seeks, resizes; no free-running loop
+  useEffect(() => {
+    const schedule = () => { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(draw); };
+    const el = video.current;
+    const unsub = useWorkspace.subscribe((s, p) => { if (s.currentMs !== p.currentMs) schedule(); });
+    el?.addEventListener('seeked', schedule);
+    el?.addEventListener('loadeddata', schedule);
+    const ro = new ResizeObserver(schedule);
+    if (canvas.current) ro.observe(canvas.current);
+    schedule();
+    return () => { unsub(); el?.removeEventListener('seeked', schedule); el?.removeEventListener('loadeddata', schedule); ro.disconnect(); cancelAnimationFrame(raf.current); };
+  }, [draw, windowKey]);
+
+  const currentMs = useWorkspace((s) => Math.round(s.currentMs / 250));
+  const inside = shift != null && (() => { const m = currentMs * 250 + shift; return m >= 0 && m <= v.video.duration_ms; })();
   return (
-    <Card as="figure" padded={false} className="overflow-hidden">
+    <figure className="card overflow-hidden" data-primary={primary ? '1' : undefined}>
       <div className="relative bg-black" style={{ aspectRatio: `${v.video.width} / ${v.video.height}` }}>
-        <video ref={setRef} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
+        <video ref={(el) => { video.current = el; setRef(el); }} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
-        {shift == null && <Notice>Not synchronized with the other sources: no recorded clock relation. It plays on its own clock.</Notice>}
-        {shift != null && !inside && <Notice>No footage at this case time.</Notice>}
+        {shift == null && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">Not synchronized: no recorded clock relation. Not slaved to the case clock.</div>}
+        {shift != null && !inside && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">No footage at this case time.</div>}
       </div>
-      <figcaption className="t-caption flex items-center justify-between gap-2 px-3 py-2 text-fg-3">
-        <span className="truncate">{v.kind === 'cctv' ? 'CCTV' : 'Dashcam'} · {v.original_filename}{v.synthetic ? ' · synthetic' : ''}</span>
-        <span className="mono">{media != null ? `media ${clock(media)}` : 'own clock'}{isMaster ? ' · clock' : ''}</span>
+      <figcaption className="space-y-1.5 px-3 py-2 text-fg-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="neutral">{v.kind === 'cctv' ? 'CCTV · fixed' : 'Dashcam · moving'}</Badge>
+          {v.synthetic ? <Badge variant="warning">SYNTHETIC</Badge> : <Badge variant="info">REAL</Badge>}
+          {isClock && <Badge variant="accent">clock</Badge>}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="t-caption min-w-0 flex-1 truncate" title={v.original_filename}>{v.original_filename}</span>
+          {onMakePrimary && <Button size="sm" variant="ghost" onClick={onMakePrimary}>Make main</Button>}
+        </div>
       </figcaption>
-    </Card>
+    </figure>
   );
 }
-
-const Notice = ({ children }) => <div className="absolute inset-x-0 bottom-0 bg-black/70 px-3 py-2 text-xs text-white">{children}</div>;

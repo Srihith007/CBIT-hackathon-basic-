@@ -1,0 +1,46 @@
+import { useEffect, useRef } from 'react';
+import { useWorkspace } from '../store';
+import { CATEGORY_STYLE } from '../fmt';
+
+/** Seek bar over the case clock with an event tick for every placed event. The playhead is moved by subscribing to the store and writing a
+ *  CSS transform: React does not re-render this component while the video plays. */
+export default function Scrubber({ range, events, onSeek, onSelect }) {
+  const wrap = useRef(null);
+  const head = useRef(null);
+  const [lo, hi] = range;
+  const span = Math.max(hi - lo, 1);
+  const pct = (ms) => Math.min(Math.max(((ms - lo) / span) * 100, 0), 100);
+
+  useEffect(() => {
+    const move = (ms) => { if (head.current) head.current.style.left = `${pct(ms)}%`; };
+    move(useWorkspace.getState().currentMs);
+    return useWorkspace.subscribe((s, prev) => { if (s.currentMs !== prev.currentMs) move(s.currentMs); });
+  }, [lo, hi]);
+
+  const at = (clientX) => {
+    const r = wrap.current.getBoundingClientRect();
+    return lo + Math.min(Math.max((clientX - r.left) / r.width, 0), 1) * span;
+  };
+  const onDown = (e) => {
+    if (e.target.dataset.tick) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onSeek(at(e.clientX));
+  };
+  const onMove = (e) => { if (e.buttons === 1) onSeek(at(e.clientX)); };
+
+  return (
+    <div ref={wrap} role="slider" tabIndex={0} aria-label="Seek on the case clock" aria-valuemin={Math.round(lo)} aria-valuemax={Math.round(hi)}
+         aria-valuenow={Math.round(useWorkspace.getState().currentMs)}
+         onPointerDown={onDown} onPointerMove={onMove}
+         onKeyDown={(e) => { if (e.key === 'Home') onSeek(lo); if (e.key === 'End') onSeek(hi); }}
+         className="relative h-7 cursor-pointer touch-none select-none rounded-full border border-line bg-surface-2">
+      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-line" aria-hidden />
+      {events.map((e) => (
+        <button key={e.id} type="button" data-tick="1" title={e.title} aria-label={e.title}
+                onClick={() => onSelect(e)} style={{ left: `${pct(e.start_ms)}%`, background: CATEGORY_STYLE[e.category]?.color }}
+                className="absolute top-1/2 h-3 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-sm opacity-80 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" />
+      ))}
+      <div ref={head} className="pointer-events-none absolute top-0 h-full w-0.5 -translate-x-1/2 bg-accent shadow-[0_0_0_3px_rgb(var(--accent)/0.2)]" aria-hidden />
+    </div>
+  );
+}

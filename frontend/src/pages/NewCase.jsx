@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import Shell from '../layout';
 import { Alert, Badge, Button, Card, Field, Input, Select, Textarea } from '../ui-kit';
 import { api } from '../api';
 
@@ -8,8 +9,9 @@ const STAGE = { validate: 'Checking the file', preprocess: 'Indexing frames', de
 /** Upload evidence, wait for the pipeline, build the reconstruction, open the workspace. Every file must be declared real or synthetic. */
 export default function NewCase() {
   const nav = useNavigate();
-  const [title, setTitle] = useState('');
-  const [designation, setDesignation] = useState('real');
+  const [params] = useSearchParams();
+  const [title, setTitle] = useState(params.get('title') || '');
+  const [designation, setDesignation] = useState(['real', 'staged', 'synthetic'].includes(params.get('designation')) ? params.get('designation') : 'real');
   const [videos, setVideos] = useState([]);
   const [sensor, setSensor] = useState(null);
   const [statement, setStatement] = useState('');
@@ -33,7 +35,7 @@ export default function NewCase() {
       }
       for (;;) {
         const jobs = (await api.jobs(c.id)).items;
-        const active = jobs.filter((j) => ['pending', 'running', 'retrying'].includes(j.status));
+        const active = jobs.filter((j) => ['pending', 'validating', 'processing'].includes(j.status));
         const failed = jobs.filter((j) => j.status === 'failed');
         if (failed.length) throw new Error(`${STAGE[failed[0].stage] || failed[0].stage} failed: ${failed[0].error || 'see job log'}`);
         if (!active.length && jobs.some((j) => j.stage === 'track' && j.status === 'completed')) break;
@@ -48,9 +50,9 @@ export default function NewCase() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <Link to="/dashboard" className="t-caption text-fg-3">← Investigations</Link>
-      <h1 className="mb-1 mt-1 text-2xl font-semibold">New investigation</h1>
+    <Shell crumbs={[{ label: 'New investigation' }]}>
+    <div className="mx-auto max-w-2xl">
+      <h1 className="mb-1 text-2xl font-semibold">New investigation</h1>
       <p className="t-small mb-6 text-fg-2">Upload dashcam or CCTV video (and optionally a sensor CSV or a witness statement). Detection runs on your machine; nothing is sent elsewhere.</p>
       <Card as="form" onSubmit={run} className="space-y-4">
         <Field label="Case title"><Input required value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} /></Field>
@@ -78,5 +80,6 @@ export default function NewCase() {
       </Card>
       <p className="t-caption mt-4 text-fg-3">A single video is its own clock. With several videos, record how their clocks relate (API: sync-edges) before they are compared.</p>
     </div>
+    </Shell>
   );
 }

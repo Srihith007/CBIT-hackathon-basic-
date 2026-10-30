@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Segmented } from '../ui-kit';
 import { ACTOR_COLORS } from '../fmt';
+import { useThrottledTime } from '../hooks';
 
 /** Paths of tracked vehicles. Image frame = pixels of a fixed camera (not to scale). Ground frame = calibrated plane with per-point uncertainty.
  *  Solid = sampled positions, dashed = a gap between samples (not observed), ring = uncertainty. Dashcam paths are not drawn: their image motion includes the camera's own. */
-export default function Trajectory({ trajs, currentMs, actors, selected, onSelect }) {
+export default function Trajectory({ trajs, actors, selected, onSelect }) {
+  const currentMs = useThrottledTime(8);
   const hasGround = trajs.some((t) => t.frame === 'ground_plane');
   const [frame, setFrame] = useState(hasGround ? 'ground_plane' : 'image');
   const list = trajs.filter((t) => t.frame === frame && !t.track_ref.moving_camera);
