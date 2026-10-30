@@ -162,6 +162,18 @@ def test_selected_accident_video_is_detected_tracked_and_reviewed(client):
 
     findings = client.get(f"/api/v1/cases/{case['id']}/findings").json()
     gap_rows = client.get(f"/api/v1/cases/{case['id']}/gaps").json()["items"]
+    assert client.get(f"/api/v1/cases/{case['id']}/contradictions").json()["items"] == []
+    checked = client.get(f"/api/v1/evidence/{eid}/original", params={"verify": True})
+    assert checked.status_code == 200 and checked.headers["x-content-sha256"] == REAL_SHA
+    created = client.post(f"/api/v1/cases/{case['id']}/reports", json={})
+    assert created.status_code == 201, created.text
+    report = created.json()
+    assert report["validation"]["passed"] is True and report["has_pdf"] is True
+    sections = report["content"]["sections"]
+    assert len(sections) == 16 and sections[0]["title"] == "Case overview"
+    assert "SYNTHETIC" not in sections[0]["facts"]["data_designation"]
+    assert client.get(f"/api/v1/reports/{report['id']}/markdown").status_code == 200
+    assert client.get(f"/api/v1/reports/{report['id']}/pdf").status_code == 200
     case_body = client.get(f"/api/v1/cases/{case['id']}").json()
     _summary({
         "case_id": case["id"],
