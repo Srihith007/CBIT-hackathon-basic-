@@ -236,6 +236,29 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 4. **Activity/audit feed, cross-case jobs and findings lists** for the dashboard (`GET /activity`, `GET /jobs?status=`, `GET /findings?review_status=`): today the UI fans out per case.
 5. **A job/stage list per evidence** (`GET /evidence/{id}/jobs`) would remove client-side filtering; optional.
 
+## 14. V2 reconstruction reads and source metadata (additive)
+
+The field lists are in `docs/RECONSTRUCTION_DATA_MODEL.md`. This section names the routes. No existing key is renamed, removed, or given a new unit. Clients that ignore unknown keys keep working.
+
+| Route | Change |
+|---|---|
+| `GET /cases/{id}/evidence`, `GET /evidence/{id}`, upload response `evidence` | Adds `source`. `video` is unchanged |
+| `PATCH /evidence/{id}/source` | New. Body is a subset of the editable source fields. Returns the evidence object, including `source` |
+| `POST /cases/{id}/evidence` | `kind` may be `other` (video bytes, not sent to detect/track). Same-bytes duplicate response is unchanged (`200`, `duplicate: true`) |
+| `GET /cases/{id}/timeline` | Each event gains `evidence_class`, `clocks`, `trace`. The payload gains `overlaps` and `hypotheses`. `lanes`, `unplaced`, `start_ms`, `end_ms`, `marks` are unchanged |
+| `GET /events/{id}` | Same three event fields. `nearby` is unchanged |
+| `GET /cases/{id}/associations?scenario_id` | New. `{scenario_id, items}` |
+| `POST /cases/{id}/associations` | New. `201` `{item}`. Status is always `uncertain`. Does not create a corroboration |
+| `GET /cases/{id}/reconstruction/completeness?scenario_id` | New. See the data-model doc |
+| Incident routes in §7a | Unchanged. Clocks are on the timeline event, not copied onto incident cards |
+| Report `POST` | Unchanged. Default format remains `full` |
+
+`PATCH` error codes: `RECORDING_WINDOW` (422), `OFFSET_REFERENCE_REQUIRED` (422), `EVIDENCE_NOT_FOUND` (404), `CAMERA_ROLE_INVALID` (422). Association `POST` uses `TRACK_NOT_FOUND` (404) and `ASSOCIATION_NEEDS_TWO_SOURCES` (422).
+
+A source annotation offset is applied only when a scenario is built after the patch, as edge id `ann:{evidence_id}`. `PUT /evidence/{id}/clock` and `POST /cases/{id}/sync-edges` are unchanged.
+
+There is no breaking change in this section.
+
 ## Change log
 | Date | Change | Proposed by | Agreed by |
 |---|---|---|---|
@@ -243,3 +266,4 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 | 2026-10-30 | `progress` defined per stage. `width`/`height` and `bbox` are unrotated container/decoded pixels. Lone source is its own reference clock. Playback copy starts at media 0. No response field added or renamed. | Cursor | |
 | 2026-10-30 | Playback is no longer scaled to 1080. `bbox` / `frame_size` are the upright frame, matching `/stream`. `video.width` / `video.height` stay the coded size. Optional report `format` defaults to `full`. No response field renamed. | Cursor | |
 | 2026-10-30 | Added `GET /cases/{id}/incident-events`, `/incident-narrative`, and `/incident-frames`. No field on timeline, event, or event summary was renamed. Report `format` still defaults to `full`. | Cursor | |
+| 2026-10-30 | §14 and `docs/RECONSTRUCTION_DATA_MODEL.md`. Additive `source`, `clocks`, `evidence_class`, `trace`, `overlaps`, `hypotheses`, associations, and completeness. No existing field renamed. | Cursor | |

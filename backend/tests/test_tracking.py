@@ -188,6 +188,15 @@ def test_tracking_rerun_is_idempotent(client, bus_video):
     assert "reused_model_run" in client.get(f"/api/v1/jobs/{again['id']}").json()["result"]
 
 
+def test_equal_tracker_ids_are_not_the_same_vehicle():
+    """Synthetic tracks. The same integer on two cameras is not an identity and not a match."""
+    tracks = [
+        {"evidence_id": "ev_a", "model_run_id": "run_a", "track_id": 1, "class": "car"},
+        {"evidence_id": "ev_b", "model_run_id": "run_b", "track_id": 1, "class": "car"},
+    ]
+    assert tracking.propose_cross_camera_matches(tracks) == []
+
+
 def test_tracking_needs_a_detector_run(client, sample_video, tmp_path):
     client.settings.models_dir = tmp_path / "no_models"  # detection fails, so no detector run exists
     case = make_case(client)

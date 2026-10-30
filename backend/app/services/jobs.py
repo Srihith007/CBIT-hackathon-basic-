@@ -119,7 +119,7 @@ def handle_validate(session: Session, settings: Settings, job: ProcessingJob) ->
     result = validate(ev.kind, path)
     ev.validation = result
     ev.status = "valid" if result["ok"] else "invalid"
-    if ev.kind in VIDEO_KINDS and result["ok"]:
+    if ev.kind in (*VIDEO_KINDS, "other") and result["ok"]:
         m = result["metadata"]
         row = session.get(VideoMetadata, ev.id) or VideoMetadata(evidence_id=ev.id)
         row.duration_ms, row.fps_nominal = m["duration_ms"], m["fps_nominal"]
@@ -129,7 +129,8 @@ def handle_validate(session: Session, settings: Settings, job: ProcessingJob) ->
         if m.get("creation_time_claimed"):
             row.creation_time_claimed = datetime.fromisoformat(m["creation_time_claimed"])  # a claim, not a synchronized time
         session.add(row)
-        enqueue(session, case_id=ev.case_id, evidence_id=ev.id, stage=STAGE_PREPROCESS, input_hash=ev.sha256, params=preprocess_params(settings))
+        if ev.kind in VIDEO_KINDS:
+            enqueue(session, case_id=ev.case_id, evidence_id=ev.id, stage=STAGE_PREPROCESS, input_hash=ev.sha256, params=preprocess_params(settings))
     audit.record(session, actor="system", action="evidence_validated", case_id=ev.case_id, target_type="evidence", target_id=ev.id,
                  details={"status": ev.status, "errors": len(result["errors"]), "warnings": len(result["warnings"])})
     job.result = {"evidence_status": ev.status, "errors": result["errors"], "warnings": result["warnings"]}
