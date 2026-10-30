@@ -157,6 +157,14 @@ A lone video or sensor is its own reference clock: offset 0, one sync group, `un
 
 Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`. `links.stream` is a playback copy that starts at media time 0 (`setpts=PTS-STARTPTS` when the original is transcoded; a remux only when the file is already H.264 yuv420p MP4, upright, and already starts at 0). Height is not capped. A 90/180/270 display matrix is baked into that file once. Any other angle is rejected at validation (`Display rotation N° cannot be applied`).
 
+## 7a. Incident analysis — added reads; existing timeline and event fields are unchanged
+
+`GET /cases/{id}/incident-events?scenario_id` returns 409 `NO_RECONSTRUCTION` when no scenario exists. Body: `{scenario_id, contact_status, provenance, items[], unplaced[]}`. `contact_status` is `possible_collision`, `visually_supported_contact`, or `insufficient_evidence`. An empty candidate list is `insufficient_evidence`. `none` is not returned for that list. `display` on an item is `amber` only for `possible_collision`, `critical` only for `visually_supported_contact`, otherwise `neutral`. Current video rules do not emit `visually_supported_contact`. `merged_from` lists the source-event ids that were folded into the row. The payload has no plate, make, or model keys. `track_classes` are detector classes. Overlap without a speed drop stays `potential_interaction` with `display: neutral`.
+
+`GET /cases/{id}/incident-narrative?scenario_id` is read-only. The document is written when the scenario is built and is not requested from the player. `{scenario_id, contact_status, deterministic{headline, sentences[{text, classification, event_ids, evidence_ids}]}, ai_narrative_status, ai_narrative_reason, ai_narrative}`. `deterministic` is always present. `ai_narrative` is null unless `ai_narrative_status` is `ready`, in which case it is `{model, model_run_id, sentences[]}`. Reason codes when unavailable: `not_configured`, `policy_blocked`, `request_failed`, `validation_failed`. A failed model call does not replace the deterministic headline and does not store model sentences.
+
+`GET /cases/{id}/incident-frames?scenario_id&event_id` returns `{event_id, items:[{evidence_id, frame_id, frame_no, time_ms, thumbnail_url, full_url}]}`. Items are extracted frames whose `frame_no` is an endpoint on the event. A missing index row is omitted. The route does not create a JPEG.
+
 ## 8. Event — items of `lanes`/`unplaced`; `GET /events/{id}` adds `nearby[]` and `note`; `GET /events/{id}/summary`
 | Field | Type | Null | Unit / convention | Basis |
 |---|---|---|---|---|
@@ -234,3 +242,4 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 | (initial) | Baseline documented from commit 76cec77 | Claude | Cursor, with the corrections in the next row |
 | 2026-10-30 | `progress` defined per stage. `width`/`height` and `bbox` are unrotated container/decoded pixels. Lone source is its own reference clock. Playback copy starts at media 0. No response field added or renamed. | Cursor | |
 | 2026-10-30 | Playback is no longer scaled to 1080. `bbox` / `frame_size` are the upright frame, matching `/stream`. `video.width` / `video.height` stay the coded size. Optional report `format` defaults to `full`. No response field renamed. | Cursor | |
+| 2026-10-30 | Added `GET /cases/{id}/incident-events`, `/incident-narrative`, and `/incident-frames`. No field on timeline, event, or event summary was renamed. Report `format` still defaults to `full`. | Cursor | |

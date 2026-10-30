@@ -17,6 +17,7 @@ import Findings from '../components/Findings';
 import Sensor from '../components/Sensor';
 import Evidence from '../components/Evidence';
 import { FrameDrawer, SensorDrawer, StatementDrawer } from '../components/EvidenceDrawers';
+import { IncidentCards, IncidentGallery, IncidentOverview, IncidentVehicles } from '../components/IncidentAnalysis';
 
 export default function Workspace() {
   const { caseId } = useParams();
@@ -26,6 +27,9 @@ export default function Workspace() {
   const [scenarios, setScenarios] = useState([]);
   const [scenarioId, setScenarioId] = useState(null);
   const [trail, setTrail] = useState(null);
+  const [incident, setIncident] = useState(null);
+  const [narrative, setNarrative] = useState(null);
+  const [frames, setFrames] = useState([]);
   const overlays = useWorkspace((s) => s.overlays);
   const selectedActor = useWorkspace((s) => s.selectedActorId);
   const activeId = useWorkspace((s) => s.activeEventId);
@@ -38,11 +42,14 @@ export default function Workspace() {
       setScenarios(sc.items);
       const chosen = sid || sc.items.find((s) => s.is_baseline)?.id || sc.items[0]?.id;
       if (!chosen) return setData({ c, ev: ev.items, actors: actors.items, none: true });
-      const [tl, cons, crbs, gaps, finds, trajs, seek0] = await Promise.all([
+      const [tl, cons, crbs, gaps, finds, trajs, seek0, inc, nar] = await Promise.all([
         api.timeline(caseId, chosen), api.contradictions(caseId, chosen), api.corroborations(caseId, chosen), api.gaps(caseId, chosen),
         api.findings(caseId, chosen), api.trajectories(caseId, chosen), api.seek(caseId, 0, chosen),
+        api.incidentEvents(caseId, chosen), api.incidentNarrative(caseId, chosen),
       ]);
       setScenarioId(chosen);
+      setIncident(inc);
+      setNarrative(nar);
       useWorkspace.getState().reset(caseId, chosen);
       setData({ c, ev: ev.items, actors: actors.items, tl, cons: cons.items, crbs: crbs.items, gaps: gaps.items, finds: finds.items, trajs: trajs.items, seek0 });
     } catch (e) { setErr(e); }
@@ -93,6 +100,13 @@ export default function Workspace() {
     return () => window.removeEventListener('keydown', k);
   }, [stepEvent]);
   const seekTo = useCallback((ms) => { const st = useWorkspace.getState(); st.setPlaying(false); st.requestSeek(ms); }, []);
+  useEffect(() => {
+    const chosen = incident?.items?.find((item) => item.id === activeId) || incident?.unplaced?.find((item) => item.id === activeId) || incident?.items?.[0];
+    if (!scenarioId || !chosen) { setFrames([]); return undefined; }
+    let cancel = false;
+    api.incidentFrames(caseId, scenarioId, chosen.id).then((result) => { if (!cancel) setFrames(result.items || []); }).catch(() => { if (!cancel) setFrames([]); });
+    return () => { cancel = true; };
+  }, [activeId, incident, scenarioId, caseId]);
 
   const crumbs = [{ label: data?.c?.title || 'Workspace' }];
   if (err) return <Shell crumbs={crumbs}><ErrorState title={err.code === 'CASE_NOT_FOUND' ? 'This case does not exist' : 'Could not load the case'} description={err.message} onRetry={() => load()} /></Shell>;
@@ -122,6 +136,9 @@ export default function Workspace() {
             {/* centre: video + timeline. On a short window the timeline keeps a share of the column and the video card scrolls inside itself. */}
             <div className="order-1 min-w-0 space-y-4 xl:order-2 [@media(max-height:1100px)]:flex [@media(max-height:1100px)]:h-full [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-col [@media(max-height:1100px)]:gap-3 [@media(max-height:1100px)]:space-y-0 [@media(max-height:1100px)]:overflow-hidden">
               <Card as="section" padded={false} className="p-3 sm:p-4 [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-1 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence video">
+                <IncidentOverview narrative={narrative} provenance={incident?.provenance} />
+                <IncidentVehicles actors={data.actors} items={[...(incident?.items || []), ...(incident?.unplaced || [])]} />
+                <IncidentGallery items={frames} />
                 <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={events} onSelectEvent={pick} />
                 <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pt-3">
                   <Checkbox label="Boxes" checked={overlays.boxes} onChange={() => useWorkspace.getState().toggleOverlay('boxes')} />
@@ -130,7 +147,8 @@ export default function Workspace() {
                 </div>
               </Card>
               <Card as="section" padded={false} className="p-3 sm:p-4 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
-                <SectionHeader title="Timeline" description={`${events.length} placed events · ${data.tl.unplaced.length} unplaced`} className="!mb-3" />
+                <SectionHeader title="Timeline" description={`${incident?.items?.length || 0} incident events · ${events.length} placed events`} className="!mb-3" />
+                <IncidentCards items={incident?.items || []} unplaced={incident?.unplaced || []} activeId={activeId} onSelect={pick} />
                 <Timeline tl={data.tl} gaps={data.gaps} onSelect={pick} onSeek={seekTo} />
               </Card>
             </div>
@@ -193,18 +211,29 @@ export default function Workspace() {
             </Card>
           </div>
 
-          {/* bottom: trajectory + telemetry */}
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <Card as="section" padded={false} className="p-3 sm:p-4" aria-label="Trajectories">
-              <SectionHeader title="Trajectories" className="!mb-3" />
-              <Trajectory trajs={data.trajs} actors={data.actors} selected={selectedActor} onSelect={(id) => useWorkspace.getState().selectActor(id)} />
-            </Card>
-            <Card as="section" padded={false} className="p-3 sm:p-4" aria-label="Telemetry">
-              <SectionHeader title="Sensor telemetry" className="!mb-3" />
-              {sensorEv ? <Sensor evidence={sensorEv} shift={shifts[sensorEv.id]} label={sensorEv.original_filename} events={(data.tl.lanes.sensor || []).filter((e) => ['hard_braking', 'collision_flag'].includes(e.event_type))} onSelect={pick} />
-                : <p className="t-small text-fg-3">No sensor file in this case.</p>}
-            </Card>
-          </div>
+          <section aria-label="Evidence correlation" className="mt-4">
+            <SectionHeader title="Evidence correlation" className="!mb-2" />
+            {!data.crbs.length && !data.cons.length ? <p className="t-small text-fg-3">No corroboration or contradiction is stored for this scenario.</p> : (
+              <ul className="space-y-2">
+                {data.crbs.map((row) => <li key={row.id} className="rounded-lg border border-line px-3 py-2"><span className="mono t-caption text-fg-3">{row.rule_id}</span> · events {row.events.join(', ')}<p className="t-small text-fg-2">{row.explanation}</p></li>)}
+                {data.cons.map((row) => <li key={row.id} className="rounded-lg border border-line px-3 py-2"><span className="mono t-caption text-fg-3">{row.rule_id}</span> · events {row.event_a}, {row.event_b}<p className="t-small text-fg-2">{row.explanation}</p></li>)}
+              </ul>
+            )}
+          </section>
+          <details className="mt-4 rounded-lg border border-line p-3">
+            <summary className="t-small cursor-pointer text-fg">Technical detail</summary>
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div>
+                <h3 className="t-eyebrow mb-2 text-fg-3">Trajectories</h3>
+                <Trajectory trajs={data.trajs} actors={data.actors} selected={selectedActor} onSelect={(id) => useWorkspace.getState().selectActor(id)} />
+              </div>
+              <div>
+                <h3 className="t-eyebrow mb-2 text-fg-3">Sensor telemetry</h3>
+                {sensorEv ? <Sensor evidence={sensorEv} shift={shifts[sensorEv.id]} label={sensorEv.original_filename} events={(data.tl.lanes.sensor || []).filter((e) => ['hard_braking', 'collision_flag'].includes(e.event_type))} onSelect={pick} />
+                  : <p className="t-small text-fg-3">No sensor file in this case.</p>}
+              </div>
+            </div>
+          </details>
         </>
       )}
       <p className="t-caption mt-6 text-fg-3">TraceLine supports an investigation. It does not determine fault or legal responsibility. Machine detections are candidates; inferences list their alternatives.</p>

@@ -18,7 +18,9 @@ from app.models import (Actor, ActorLink, Camera, Case, Contradiction, Corrobora
                         ExtractedFrame, GapRecord, InvestigationFinding, ModelRun, ReconstructionScenario, SensorRecord, SensorSource,
                         SourceEvent, Trajectory, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
 from app.models.engine import ClockRecord, SyncEdge
-from app.services import audit, engine_rules as rules, geometry, sync
+from app.config import get_settings
+from app.llm.featherless import FeatherlessClient
+from app.services import audit, engine_rules as rules, geometry, incident, sync
 
 ENGINE_VERSION = "1"
 TIME_WORDS = [
@@ -275,10 +277,14 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         finding("open_question", q["refs"] or [q["event"]], q["text"])
     for e in inf_events:
         finding("inference", [e["id"]], e["statement"])
+    db.flush()
+    settings = get_settings()
+    narrative = incident.narrate(db, case, scn, FeatherlessClient(settings), settings)
     scn_counts = {"events": len(events) + len(inf_events), "contradictions": len(con_rows), "corroborations": len(crb_rows), "gaps": len(gap_rows), "trajectories": n_traj,
                   "open_questions": len(questions), "findings": n_find, "inferences": len(inf_events), "sync_groups": len(solved["groups"]),
                   "unsynchronized_sources": solved["unsynchronized"], "sync_inconsistencies": len(solved["inconsistencies"])}
-    scn.assumptions = asm | {"build": scn_counts, "sync_solution": solved, "engine_version": ENGINE_VERSION, "rules_version": rules.RULES_VERSION}
+    scn.assumptions = asm | {"build": scn_counts, "sync_solution": solved, "engine_version": ENGINE_VERSION, "rules_version": rules.RULES_VERSION,
+                             "incident_narrative": narrative}
     audit.record(db, actor=who, action="reconstruction_built", case_id=case.id, target_type="scenario", target_id=scn.id, details=scn_counts | {"unsynchronized_sources": len(solved["unsynchronized"])})
     return scn_counts
 

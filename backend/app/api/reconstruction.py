@@ -11,7 +11,7 @@ from app.db import get_db
 from app.errors import AppError
 from app.models import (Actor, Case, Contradiction, Corroboration, Event, EventSummary, GapRecord, InvestigationFinding, ReconstructionScenario,
                         Trajectory)
-from app.services import audit, engine_rules as rules, reconstruct, sync
+from app.services import audit, engine_rules as rules, incident, reconstruct, sync
 
 router = APIRouter(tags=["reconstruction"])
 NOTE = "Derived analysis for investigator review. Observations, claims and inferences are kept apart; nothing here assigns fault or legal responsibility."
@@ -200,6 +200,33 @@ def collision_candidates(scenario_id: str | None = None, case: Case = Depends(ge
     cands = sorted(ev, key=lambda e: (e.start_case_ms is None, e.start_case_ms or 0))
     return {"scenario_id": scn.id, "items": [event_out(e) for e in cands],
             "note": "Candidates only. A collision is not established by one detection; independent agreement is listed under corroborations."}
+
+
+@router.get("/cases/{case_id}/incident-events")
+def incident_events(scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    """Merged investigator list. Source events are not deleted. Overlap alone stays a proximity event."""
+    scn = get_scenario(db, case, scenario_id)
+    view = incident.view_for_scenario(db, scn)
+    return {"scenario_id": scn.id, "contact_status": view["contact_status"], "provenance": view["provenance"],
+            "items": view["items"], "unplaced": view["unplaced"]}
+
+
+@router.get("/cases/{case_id}/incident-narrative")
+def incident_narrative(scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    """Stored at scenario build. This read does not call Featherless."""
+    scn = get_scenario(db, case, scenario_id)
+    return incident.read_narrative(db, scn)
+
+
+@router.get("/cases/{case_id}/incident-frames")
+def incident_frames(event_id: str = Query(...), scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    """Extracted frames whose frame_no is an endpoint on the event. Missing index rows are omitted."""
+    scn = get_scenario(db, case, scenario_id)
+    view = incident.view_for_scenario(db, scn)
+    item = next((i for i in view["items"] + view["unplaced"] if i["id"] == event_id), None)
+    if item is None:
+        raise AppError(404, "EVENT_NOT_FOUND", f"No incident event with id {event_id}")
+    return {"event_id": event_id, "items": incident.frames_for(db, item)}
 
 
 def finding_out(f: InvestigationFinding) -> dict:
