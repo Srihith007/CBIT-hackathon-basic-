@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Badge, Card, EmptyState, ErrorState, LoadingState, StatCard } from '../ui-kit';
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, StatCard } from '../ui-kit';
 import { api } from '../api';
 
 export default function Dashboard() {
@@ -17,7 +17,7 @@ export default function Dashboard() {
           <Link to="/" className="t-caption text-fg-3">← TraceLine</Link>
           <h1 className="mt-1 text-2xl font-semibold">Investigations</h1>
         </div>
-        <div className="flex items-center gap-3"><Badge variant="warning">Investigation support · no fault determination</Badge><Link to="/new" className="btn btn-sm">New investigation</Link></div>
+        <div className="flex items-center gap-3"><Badge variant="warning">Investigation support · no fault determination</Badge><Button as={Link} to="/new" size="sm" variant="primary">New investigation</Button></div>
       </header>
       {err && <ErrorState title="The API did not answer" description={`${err}. Start it with: uvicorn app.main:app --port 8000`} />}
       {!err && !d && <LoadingState label="Loading" />}

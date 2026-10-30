@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { ZoomIn, ZoomOut } from 'lucide-react';
+import { Button, IconButton } from '../ui-kit';
 import { CATEGORY_STYLE, LANES, clock, sec } from '../fmt';
 
 const LANE_H = 34;
@@ -31,9 +33,9 @@ export default function Timeline({ tl, gaps = [], currentMs = 0, onSelect, activ
     <div>
       {!compact && (
         <div className="mb-2 flex items-center gap-2">
-          <button className="btn btn-sm btn-outline" onClick={() => setZoom((z) => Math.min(z * 2, 16))} aria-label="Zoom in">+</button>
-          <button className="btn btn-sm btn-outline" onClick={() => setZoom((z) => Math.max(z / 2, 1))} aria-label="Zoom out">−</button>
-          <button className="btn btn-sm btn-outline" onClick={() => { setZoom(1); setPan(0); }}>Fit</button>
+          <IconButton icon={ZoomIn} label="Zoom in" variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(z * 2, 16))} />
+          <IconButton icon={ZoomOut} label="Zoom out" variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(z / 2, 1))} />
+          <Button size="sm" variant="outline" onClick={() => { setZoom(1); setPan(0); }}>Fit</Button>
           {zoom > 1 && <input type="range" min={0} max={Math.max(full[1] - full[0] - width, 1)} value={pan} onChange={(e) => setPan(+e.target.value)} className="w-40" aria-label="Pan" />}
           <span className="t-caption ml-auto flex flex-wrap gap-3 text-fg-3">
             {Object.values(CATEGORY_STYLE).map((c) => <span key={c.label} className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-sm" style={{ background: c.color }} />{c.label}</span>)}

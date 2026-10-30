@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Badge, Segmented } from '../ui-kit';
+import { Badge, Button, Card, Segmented } from '../ui-kit';
 import { api } from '../api';
 
 const KINDS = [['contradiction', 'Contradictions'], ['corroboration', 'Corroborations'], ['gap', 'Gaps'], ['open_question', 'Open questions'], ['inference', 'Inferences']];
@@ -20,7 +20,7 @@ export default function Findings({ findings, contradictions, corroborations, gap
         {rows.map((f) => {
           const c = con[f.ref_ids[0]], r = crb[f.ref_ids[0]], g = gap[f.ref_ids[0]];
           return (
-            <li key={f.id} className="card p-4">
+            <Card as="li" key={f.id} padded={false} className="p-4">
               <div className="mb-1 flex flex-wrap items-center gap-2">
                 {c && <><Badge variant="danger">{c.rule_id}</Badge><Badge variant={c.strength === 'clear' ? 'warning' : 'neutral'}>{c.strength}</Badge></>}
                 {r && <><Badge variant="success">{r.rule_id}</Badge><Badge variant="info">{r.independent ? 'independent sources' : 'not independent'}</Badge></>}
@@ -33,11 +33,11 @@ export default function Findings({ findings, contradictions, corroborations, gap
               {r && <p className="t-caption mt-1 text-fg-3">{r.independence_reason}</p>}
               {g && <p className="t-caption mt-1 text-fg-3">Next step: {g.recommendation}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
-                {(c ? [c.event_a, c.event_b] : r ? r.events.slice(0, 2) : []).map((id, i) => <button key={id} className="btn btn-sm btn-outline" onClick={() => onFocusEvent(id)}>Show event {i + 1}</button>)}
-                <button className="btn btn-sm btn-outline ml-auto" onClick={() => review(f, 'reviewed')}>Mark reviewed</button>
-                <button className="btn btn-sm btn-outline" onClick={() => review(f, 'disputed')}>Dispute</button>
+                {(c ? [c.event_a, c.event_b] : r ? r.events.slice(0, 2) : []).map((id, i) => <Button key={id} size="sm" variant="outline" onClick={() => onFocusEvent(id)}>Show event {i + 1}</Button>)}
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => review(f, 'reviewed')}>Mark reviewed</Button>
+                <Button size="sm" variant="outline" onClick={() => review(f, 'disputed')}>Dispute</Button>
               </div>
-            </li>
+            </Card>
           );
         })}
       </ul>

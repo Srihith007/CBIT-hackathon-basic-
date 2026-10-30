@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Badge, ErrorState, LoadingState, Segmented, Tabs } from '../ui-kit';
+import { Badge, Button, Card, Checkbox, ErrorState, LoadingState, Select, Tabs } from '../ui-kit';
 import { api } from '../api';
 import { useWorkspace } from '../store';
 import Player from '../components/Player';
@@ -86,12 +86,11 @@ export default function Workspace() {
         <div className="ml-auto flex items-center gap-3">
           {scenarios.length > 1 && (
             <label className="t-caption flex items-center gap-2 text-fg-3">Scenario
-              <select className="control h-8" value={scenarioId || ''} onChange={(e) => load(e.target.value)}>
-                {scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}{s.is_baseline ? ' (baseline)' : ''}</option>)}
-              </select>
+              <Select className="h-9" value={scenarioId || ''} onChange={(e) => load(e.target.value)}
+                      options={scenarios.map((s) => ({ value: s.id, label: `${s.name}${s.is_baseline ? ' (baseline)' : ''}` }))} />
             </label>
           )}
-          <Link to={`/cases/${caseId}/report`} className="btn btn-sm btn-outline">Report</Link>
+          <Button as={Link} to={`/cases/${caseId}/report`} size="sm" variant="outline">Report</Button>
         </div>
       </header>
 
@@ -100,40 +99,40 @@ export default function Workspace() {
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,1fr)]">
           <div className="space-y-4">
-            <section className="card p-4" aria-label="Evidence video">
+            <Card as="section" padded={false} className="p-4" aria-label="Evidence video">
               <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} />
               <div className="mt-2 flex gap-3">
-                <label className="t-caption flex items-center gap-1 text-fg-3"><input type="checkbox" checked={ws.overlays.boxes} onChange={() => ws.toggleOverlay('boxes')} /> boxes</label>
-                <label className="t-caption flex items-center gap-1 text-fg-3"><input type="checkbox" checked={ws.overlays.ids} onChange={() => ws.toggleOverlay('ids')} /> labels</label>
+                <Checkbox label="Boxes" checked={ws.overlays.boxes} onChange={() => ws.toggleOverlay('boxes')} />
+                <Checkbox label="Labels" checked={ws.overlays.ids} onChange={() => ws.toggleOverlay('ids')} />
                 <span className="t-caption ml-auto text-fg-3">Dashed box = first observation recovered after tracking started. Boxes exist only on sampled frames.</span>
               </div>
-            </section>
-            <section className="card p-4" aria-label="Timeline">
+            </Card>
+            <Card as="section" padded={false} className="p-4" aria-label="Timeline">
               <div className="mb-2 flex items-center gap-2">
                 <h2 className="t-h2">Timeline</h2>
                 <span className="t-caption text-fg-3">Case clock. Red ring = contradicted, green ring = corroborated, hatched = missing data. [ and ] jump between events.</span>
               </div>
               <Timeline tl={data.tl} gaps={data.gaps} currentMs={ws.currentMs} onSelect={pick} activeId={ws.activeEventId} />
-            </section>
-            <section className="card p-4" aria-label="Trajectories">
+            </Card>
+            <Card as="section" padded={false} className="p-4" aria-label="Trajectories">
               <h2 className="t-h2 mb-2">Trajectories</h2>
               <Trajectory trajs={data.trajs} currentMs={ws.currentMs} actors={data.actors} selected={ws.selectedActorId} onSelect={ws.selectActor} />
-            </section>
+            </Card>
             {sensorEv && (
-              <section className="card p-4" aria-label="Sensor">
+              <Card as="section" padded={false} className="p-4" aria-label="Sensor">
                 <h2 className="t-h2 mb-2">Sensor</h2>
                 <Sensor evidence={sensorEv} shift={shifts[sensorEv.id]} label={sensorEv.original_filename} events={(data.tl.lanes.sensor || []).filter((e) => ['hard_braking', 'collision_flag'].includes(e.event_type))} onSelect={pick} />
-              </section>
+              </Card>
             )}
           </div>
-          <aside className="card h-fit p-4 xl:sticky xl:top-4" aria-label="Details">
+          <Card as="aside" padded={false} className="h-fit p-4 xl:sticky xl:top-4" aria-label="Details">
             <Tabs value={tab} onChange={setTab} label="Details" items={[{ id: 'summary', label: 'Summary' }, { id: 'findings', label: `Findings (${data.finds.length})` }, { id: 'evidence', label: 'Evidence' }]} />
             <div className="mt-4 max-h-[calc(100vh-9rem)] overflow-auto pr-1">
               {tab === 'summary' && <SummaryPanel eventId={ws.activeEventId} />}
               {tab === 'findings' && <Findings findings={data.finds} contradictions={data.cons} corroborations={data.crbs} gaps={data.gaps} onFocusEvent={focusEvent} onReload={() => load(scenarioId)} />}
               {tab === 'evidence' && <Evidence caseId={caseId} evidence={data.ev} />}
             </div>
-          </aside>
+          </Card>
         </div>
       )}
       <p className="t-caption mt-6 text-fg-3">TraceLine supports an investigation. It does not determine fault or legal responsibility. Machine detections are candidates; inferences list their alternatives.</p>

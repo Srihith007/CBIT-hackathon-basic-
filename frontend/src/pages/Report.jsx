@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Badge, Button, ErrorState } from '../ui-kit';
+import { Alert, Badge, Button, Card } from '../ui-kit';
 import { Check, X } from 'lucide-react';
 import { api } from '../api';
 
@@ -20,17 +20,17 @@ export default function ReportPage() {
       <Link to={`/cases/${caseId}`} className="t-caption text-fg-3">← Workspace</Link>
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">Investigation report</h1>
-        <Button onClick={make} disabled={busy} className="ml-auto">{busy ? 'Building…' : report ? 'Generate a new version' : 'Generate report'}</Button>
+        <Button onClick={make} loading={busy} className="ml-auto" variant="primary">{busy ? 'Building…' : report ? 'Generate a new version' : 'Generate report'}</Button>
       </div>
-      {err && <ErrorState title="Could not build the report" description={err} />}
+      {err && <Alert variant="danger" title="Could not build the report">{err}</Alert>}
       {report && (
         <>
-          <section className="card mb-6 p-4">
+          <Card as="section" padded={false} className="mb-6 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={report.validation.passed ? 'success' : 'danger'}>{report.validation.passed ? 'Passed validation' : 'Failed validation'}</Badge>
               <span className="t-caption text-fg-3">version {report.version}</span>
-              {report.has_pdf && <a className="btn btn-sm btn-outline ml-auto" href={api.pdfUrl(report.id)}>Download PDF</a>}
-              <a className="btn btn-sm btn-outline" href={`/api/v1/reports/${report.id}/markdown`}>Markdown</a>
+              {report.has_pdf && <Button as="a" size="sm" variant="outline" className="ml-auto" href={api.pdfUrl(report.id)}>Download PDF</Button>}
+              <Button as="a" size="sm" variant="outline" href={`/api/v1/reports/${report.id}/markdown`}>Markdown</Button>
             </div>
             <ul className="mt-3 grid gap-1 sm:grid-cols-2">
               {report.validation.checks.map((c) => (
@@ -39,8 +39,8 @@ export default function ReportPage() {
                 </li>
               ))}
             </ul>
-          </section>
-          <pre className="card whitespace-pre-wrap p-5 text-[0.8125rem] leading-6 text-fg-2" style={{ fontFamily: 'inherit' }}>{md}</pre>
+          </Card>
+          <Card as="pre" className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-fg-2" style={{ fontFamily: 'inherit' }}>{md}</Card>
         </>
       )}
       {!report && !err && <p className="t-small text-fg-2">No report has been generated for this case yet.</p>}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge } from '../ui-kit';
+import { Badge, Card } from '../ui-kit';
 import { api } from '../api';
 
 function Statement({ st, label }) {
@@ -16,11 +16,11 @@ function Statement({ st, label }) {
   });
   out.push(st.text_original.slice(at));
   return (
-    <div className="card p-4">
+    <Card padded={false} className="p-4">
       <div className="mb-1 flex items-center gap-2"><span className="t-small font-medium">{label}</span>{st.synthetic && <Badge variant="warning">synthetic</Badge>}</div>
       <p className="t-small whitespace-pre-wrap text-fg-2">{out}</p>
       <p className="t-caption mt-2 text-fg-3">Highlighted spans are extracted claims ({claims.length}). The original text is stored unchanged.</p>
-    </div>
+    </Card>
   );
 }
 
@@ -36,12 +36,12 @@ export default function Evidence({ caseId, evidence }) {
     <div className="space-y-4">
       <ul className="space-y-2">
         {evidence.map((e) => (
-          <li key={e.id} className="card flex flex-wrap items-center gap-2 p-3">
+          <Card as="li" key={e.id} padded={false} className="flex flex-wrap items-center gap-2 p-3">
             <Badge variant="neutral">{e.kind}</Badge>
             <span className="t-small">{e.original_filename}</span>
             {e.synthetic && <Badge variant="warning">synthetic</Badge>}
             <span className="mono t-caption ml-auto text-fg-3" title={e.sha256}>sha256 {e.sha256.slice(0, 12)}…</span>
-          </li>
+          </Card>
         ))}
       </ul>
       {wit.map(({ s, label }) => <Statement key={s.id} st={s} label={label} />)}

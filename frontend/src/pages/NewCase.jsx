@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Badge, Button } from '../ui-kit';
+import { Alert, Badge, Button, Card, Field, Input, Select, Textarea } from '../ui-kit';
 import { api } from '../api';
 
 const STAGE = { validate: 'Checking the file', preprocess: 'Indexing frames', detect: 'Detecting vehicles and people', track: 'Tracking and finding events', extract_claims: 'Reading statements' };
@@ -52,34 +52,30 @@ export default function NewCase() {
       <Link to="/dashboard" className="t-caption text-fg-3">← Investigations</Link>
       <h1 className="mb-1 mt-1 text-2xl font-semibold">New investigation</h1>
       <p className="t-small mb-6 text-fg-2">Upload dashcam or CCTV video (and optionally a sensor CSV or a witness statement). Detection runs on your machine; nothing is sent elsewhere.</p>
-      <form onSubmit={run} className="card space-y-4 p-5">
-        <label className="block"><span className="t-small">Case title</span>
-          <input required className="control mt-1 w-full" value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} /></label>
-        <label className="block"><span className="t-small">What is this footage?</span>
-          <select className="control mt-1 w-full" value={designation} onChange={(e) => setDesignation(e.target.value)} disabled={busy}>
-            <option value="real">Real incident footage</option><option value="staged">Staged / recreated</option><option value="synthetic">Synthetic / generated</option>
-          </select></label>
-        <div>
-          <span className="t-small">Videos</span>
-          <input type="file" accept="video/*" multiple disabled={busy} className="mt-1 block w-full text-sm"
+      <Card as="form" onSubmit={run} className="space-y-4">
+        <Field label="Case title"><Input required value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} /></Field>
+        <Field label="What is this footage?">
+          <Select value={designation} onChange={(e) => setDesignation(e.target.value)} disabled={busy}
+                  options={[{ value: 'real', label: 'Real incident footage' }, { value: 'staged', label: 'Staged / recreated' }, { value: 'synthetic', label: 'Synthetic / generated' }]} />
+        </Field>
+        <Field label="Videos" hint="Dashcam = moving camera, CCTV = fixed camera.">
+          <Input type="file" accept="video/*" multiple disabled={busy}
                  onChange={(e) => setVideos([...e.target.files].map((file) => ({ file, name: file.name, kind: /dash/i.test(file.name) ? 'dashcam' : 'cctv' })))} />
-          {videos.map((v, i) => (
-            <div key={v.name} className="mt-2 flex items-center gap-2"><span className="t-small flex-1 truncate">{v.name}</span>
-              <select className="control h-8" value={v.kind} disabled={busy} onChange={(e) => setVideos(videos.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
-                <option value="dashcam">Dashcam (moving camera)</option><option value="cctv">CCTV (fixed camera)</option></select></div>
-          ))}
-        </div>
-        <label className="block"><span className="t-small">Sensor CSV (optional; you map its columns later via the API)</span>
-          <input type="file" accept=".csv" disabled={busy} className="mt-1 block w-full text-sm" onChange={(e) => setSensor(e.target.files[0] || null)} /></label>
-        <label className="block"><span className="t-small">Witness statement (optional)</span>
-          <textarea className="control mt-1 w-full" rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} disabled={busy} /></label>
+        </Field>
+        {videos.map((v, i) => (
+          <div key={v.name} className="flex items-center gap-2"><span className="t-small flex-1 truncate">{v.name}</span>
+            <Select className="h-9" value={v.kind} disabled={busy} onChange={(e) => setVideos(videos.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}
+                    options={[{ value: 'dashcam', label: 'Dashcam (moving)' }, { value: 'cctv', label: 'CCTV (fixed)' }]} /></div>
+        ))}
+        <Field label="Sensor CSV" optional hint="You map its columns afterwards via the API."><Input type="file" accept=".csv" disabled={busy} onChange={(e) => setSensor(e.target.files[0] || null)} /></Field>
+        <Field label="Witness statement" optional><Textarea rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} disabled={busy} /></Field>
         <div className="flex items-center gap-3">
-          <Button type="submit" disabled={busy || !title || !videos.length}>{busy ? 'Working…' : 'Upload and analyse'}</Button>
+          <Button type="submit" variant="primary" loading={busy} disabled={!title || !videos.length}>{busy ? 'Working…' : 'Upload and analyse'}</Button>
           {synthetic && <Badge variant="warning">will be labelled synthetic</Badge>}
         </div>
         {log.length > 0 && <ul className="t-caption space-y-0.5 text-fg-3" role="status">{log.map((l, i) => <li key={i}>{l}</li>)}</ul>}
-        {err && <p className="t-small text-danger" role="alert">{err}</p>}
-      </form>
+        {err && <Alert variant="danger" title="Something went wrong">{err}</Alert>}
+      </Card>
       <p className="t-caption mt-4 text-fg-3">A single video is its own clock. With several videos, record how their clocks relate (API: sync-edges) before they are compared.</p>
     </div>
   );

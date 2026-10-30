@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play, StepBack, StepForward } from 'lucide-react';
+import { Button, Card, IconButton, Segmented } from '../ui-kit';
 import { api } from '../api';
 import { useWorkspace } from '../store';
 import { ACTOR_COLORS, clock } from '../fmt';
@@ -98,13 +99,11 @@ export default function Player({ videos, shifts, trackActors, actorLabels }) {
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button className="btn btn-sm" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</button>
-        <button className="btn btn-sm btn-outline" onClick={() => step(-1)} aria-label="Back 0.2 s"><StepBack className="h-4 w-4" /></button>
-        <button className="btn btn-sm btn-outline" onClick={() => step(1)} aria-label="Forward 0.2 s"><StepForward className="h-4 w-4" /></button>
+        <Button size="sm" variant="primary" icon={playing ? Pause : Play} onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? 'Pause' : 'Play'}</Button>
+        <IconButton icon={StepBack} label="Back 0.2 s" variant="outline" size="sm" onClick={() => step(-1)} />
+        <IconButton icon={StepForward} label="Forward 0.2 s" variant="outline" size="sm" onClick={() => step(1)} />
         <span className="mono t-small ml-2" aria-label="Case time">case {clock(currentMs)}</span>
-        <div className="ml-auto flex items-center gap-1">
-          {[0.25, 0.5, 1, 2].map((r) => <button key={r} onClick={() => setRate(r)} className={`btn btn-sm ${rate === r ? '' : 'btn-outline'}`}>{r}×</button>)}
-        </div>
+        <Segmented className="ml-auto" size="sm" label="Playback speed" value={rate} onChange={(v) => setRate(Number(v))} options={[0.25, 0.5, 1, 2].map((r) => ({ id: r, label: `${r}×` }))} />
       </div>
       <p className="t-caption mt-2 text-fg-3">Space play/pause · ←/→ 0.2 s (Shift 1 s) · ↑/↓ speed. The first synchronized video is the clock; others follow through the recorded offsets.</p>
     </div>
@@ -166,7 +165,7 @@ function VideoTile({ v, setRef, getEl, shift, caseMs, overlays, trackActors, act
   }, [overlays, trackActors, actorLabels]);
 
   return (
-    <figure className="card overflow-hidden p-0">
+    <Card as="figure" padded={false} className="overflow-hidden">
       <div className="relative bg-black" style={{ aspectRatio: `${v.video.width} / ${v.video.height}` }}>
         <video ref={setRef} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
@@ -177,7 +176,7 @@ function VideoTile({ v, setRef, getEl, shift, caseMs, overlays, trackActors, act
         <span className="truncate">{v.kind === 'cctv' ? 'CCTV' : 'Dashcam'} · {v.original_filename}{v.synthetic ? ' · synthetic' : ''}</span>
         <span className="mono">{media != null ? `media ${clock(media)}` : 'own clock'}{isMaster ? ' · clock' : ''}</span>
       </figcaption>
-    </figure>
+    </Card>
   );
 }
 
