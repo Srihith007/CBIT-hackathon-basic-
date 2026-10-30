@@ -12,7 +12,7 @@ vi.mock('../api', () => ({
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
     seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), summary: vi.fn(),
-    jobs: vi.fn(), modelRuns: vi.fn(), review: vi.fn(),
+    jobs: vi.fn(), modelRuns: vi.fn(), review: vi.fn(), associations: vi.fn(), completeness: vi.fn(), frames: vi.fn(),
     overlays: vi.fn(), streamUrl: (id) => `/api/v1/evidence/${id}/stream`,
   },
 }));
@@ -135,13 +135,15 @@ describe('primary workspace', () => {
       ai_narrative_status: 'unavailable', ai_narrative: null,
     });
     api.incidentFrames.mockResolvedValue({ items: [] });
+    api.associations.mockRejectedValue(new Error('404'));
+    api.completeness.mockRejectedValue(new Error('404'));
     page();
     expect(await screen.findByText('No collision or near miss was identified in the analysed evidence.')).toBeInTheDocument();
     expect(screen.getByText('AI narrative is unavailable.')).toBeInTheDocument();
     expect(document.querySelector('[aria-label="Trajectories"]')).toBeNull();
-    const details = screen.getByText('Technical detail').closest('details');
+    const details = screen.getByText('Technical details').closest('details');
     expect(details.open).toBe(false);
     expect(details).toHaveTextContent('No trajectory for this camera yet.');
-    expect(screen.getByLabelText('Evidence correlation')).toHaveTextContent('consistent with an impact, not proof');
+    expect(screen.getByLabelText('Contradictions and gaps')).toHaveTextContent('consistent with an impact, not proof');
   });
 });
