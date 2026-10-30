@@ -72,6 +72,32 @@ def test_evidence_constrained_output():
             raise AssertionError(sentence["text"])
 
 
+def test_hypothesis_sentence_must_cite_the_stored_evidence_ids():
+    """FIXTURE: synthetic. A hypothesis sentence is kept only when its evidence ids match the stored hypothesis."""
+    item = incident._project(row())
+    hyp = {"id": "evt_h", "evidence_ids": ["ev_1"], "statement": "Braking may have preceded the candidate.", "alternatives": ["braking for the junction"]}
+    empty = {"text": "The stored alternative cites the same evidence.", "classification": "inferred", "event_ids": ["evt_h"], "evidence_ids": []}
+    wrong = {"text": "The stored alternative cites the same evidence.", "classification": "inferred", "event_ids": ["evt_h"], "evidence_ids": ["ev_other"]}
+    unknown = {"text": "The stored alternative cites the same evidence.", "classification": "inferred", "event_ids": ["evt_missing"], "evidence_ids": ["ev_1"]}
+    for sentence in (empty, wrong, unknown):
+        try:
+            incident.validate_sentences([sentence], [item], [hyp])
+        except incident.NarrativeInvalid:
+            pass
+        else:
+            raise AssertionError(sentence)
+    ok = {"text": "The stored alternative cites the same evidence.", "classification": "inferred", "event_ids": ["evt_h"], "evidence_ids": ["ev_1"]}
+    incident.validate_sentences([ok], [item], [hyp])
+    blank = {"id": "evt_blank", "evidence_ids": [], "statement": "No premise evidence.", "alternatives": ["unknown"]}
+    bare = {"text": "This alternative has no evidence ids.", "classification": "insufficient", "event_ids": ["evt_blank"], "evidence_ids": ["ev_1"]}
+    try:
+        incident.validate_sentences([bare], [item], [blank])
+    except incident.NarrativeInvalid:
+        pass
+    else:
+        raise AssertionError("hypothesis without evidence ids was accepted")
+
+
 def test_evidence_ids_are_required():
     item = incident._project(row())
     bare = {"text": "A possible collision was recorded. Contact is not confirmed.", "classification": "inferred", "event_ids": [], "evidence_ids": []}
@@ -204,9 +230,13 @@ def test_featherless_failure_keeps_the_deterministic_summary(client):
         blocked = FakeClient(exc=PolicyBlocked("blocked"))
         denied = incident.narrate(db, case_row, scn_row, blocked, settings)
     assert doc["ai_narrative_status"] == "unavailable" and doc["ai_narrative_reason"] == "not_configured" and doc["ai_narrative"] is None
+    assert doc["hypothesis_explanation"]["items"] == []
     assert doc["deterministic"]["headline"] == before
     assert denied["ai_narrative_reason"] == "policy_blocked" and denied["ai_narrative"] is None and denied["deterministic"]["headline"] == before
+    assert denied["hypothesis_explanation"]["items"] == []
     assert len(missing.calls) == 1 and len(blocked.calls) == 1
+    sent = json.loads(missing.calls[0]["messages"][1]["content"])
+    assert sent["hypotheses"] == []
     assert settings.featherless_vision_model not in {c["model"] for c in missing.calls + blocked.calls}
     stored = json.dumps(doc)
     assert "substitute" not in stored and "As an AI" not in stored

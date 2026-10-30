@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_actor, get_case
 from app.db import get_db
 from app.errors import AppError
-from app.models import (Actor, Case, Contradiction, Corroboration, Event, EventSummary, GapRecord, InvestigationFinding, ReconstructionScenario,
-                        Trajectory)
+from app.models import (Actor, Case, ClockRecord, Contradiction, Corroboration, Event, EventSummary, EvidenceFile, GapRecord,
+                        InvestigationFinding, ReconstructionScenario, SourceAnnotation, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata)
 from app.services import audit, engine_rules as rules, incident, reconstruct, sync
+from app.services.reconstruction_view import clocks_for, completeness, evidence_class, group_index, hypotheses, overlaps, trace_for
 
 router = APIRouter(tags=["reconstruction"])
 NOTE = "Derived analysis for investigator review. Observations, claims and inferences are kept apart; nothing here assigns fault or legal responsibility."
@@ -81,8 +82,29 @@ def _events(db: Session, scn: ReconstructionScenario) -> list[Event]:
     return list(db.execute(select(Event).where(Event.scenario_id == scn.id)).scalars())
 
 
-def _lane(e: Event) -> str:
-    return {"video_cctv": "cctv", "video_dashcam": "dashcam", "sensor": "sensor", "witness": "witness", "engine": "inference"}.get(e.source_type, e.source_type)
+def _lane_name(source_type: str) -> str:
+    return {"video_cctv": "cctv", "video_dashcam": "dashcam", "sensor": "sensor", "witness": "witness", "engine": "inference"}.get(source_type, source_type)
+
+
+def _decorate(db: Session, case: Case, scn: ReconstructionScenario, rows: list[Event]) -> tuple[list[dict], dict]:
+    plain = [event_out(e) for e in rows]
+    by_id = {item["id"]: item for item in plain}
+    ids = [item["source_id"] for item in plain if item.get("source_id")]
+    pts = {}
+    if ids:
+        for vm in db.execute(select(VideoMetadata).where(VideoMetadata.evidence_id.in_(ids))).scalars():
+            pts[vm.evidence_id] = vm.pts_start_ms
+    clock_rows = {rec.evidence_id: {"basis": rec.basis, "utc_zero": rec.utc_zero}
+                  for rec in db.execute(select(ClockRecord).where(ClockRecord.case_id == case.id)).scalars()}
+    ctx = {"pts": pts, "clocks": clock_rows, "groups": group_index((scn.assumptions or {}).get("sync_solution"))}
+    decorated = []
+    for item in plain:
+        decorated.append(item | {
+            "evidence_class": evidence_class(item["category"], item["source_type"], item.get("source_id")),
+            "clocks": clocks_for(item, ctx),
+            "trace": trace_for(item, by_id),
+        })
+    return decorated, ctx
 
 
 @router.get("/cases/{case_id}/timeline")
@@ -92,12 +114,13 @@ def timeline(scenario_id: str | None = None, category: str | None = None, event_
     ordered against the others. Pairs of events are related only as overlapping, N s apart, or undetermined."""
     scn = get_scenario(db, case, scenario_id)
     rows = _events(db, scn)
-    sel = [e for e in rows if (not category or e.category == category) and (not event_type or e.event_type == event_type) and (not actor_id or e.actor_id == actor_id)]
-    placed = sorted([e for e in sel if e.start_case_ms is not None], key=lambda e: (e.start_case_ms, e.id))
-    loose = [e for e in sel if e.start_case_ms is None]
+    decorated, _ctx = _decorate(db, case, scn, rows)
+    sel = [e for e in decorated if (not category or e["category"] == category) and (not event_type or e["event_type"] == event_type) and (not actor_id or e["actor_id"] == actor_id)]
+    placed = sorted([e for e in sel if e["start_ms"] is not None], key=lambda e: (e["start_ms"], e["id"]))
+    loose = [e for e in sel if e["start_ms"] is None]
     lanes: dict[str, list] = {}
     for e in placed:
-        lanes.setdefault(_lane(e), []).append(event_out(e))
+        lanes.setdefault(_lane_name(e["source_type"]), []).append(e)
     cons = db.execute(select(Contradiction).where(Contradiction.scenario_id == scn.id)).scalars().all()
     crbs = db.execute(select(Corroboration).where(Corroboration.scenario_id == scn.id)).scalars().all()
     marks: dict[str, dict] = {}
@@ -107,9 +130,10 @@ def timeline(scenario_id: str | None = None, category: str | None = None, event_
     for c in crbs:
         for i in c.events:
             marks.setdefault(i, {"contradicted_by": [], "corroborated_by": []})["corroborated_by"].append(c.id)
-    span = [min((e.start_case_ms for e in placed), default=None), max(((e.end_case_ms if e.end_case_ms is not None else e.start_case_ms) for e in placed), default=None)]
+    span = [min((e["start_ms"] for e in placed), default=None), max(((e["end_ms"] if e["end_ms"] is not None else e["start_ms"]) for e in placed), default=None)]
+    ready, _unsupported = hypotheses(decorated, {e["id"]: e for e in decorated})
     return {"scenario": scenario_out(scn), "time_unit": "ms on the case clock (reference source time 0 = 0 ms)", "span_ms": span, "lanes": lanes,
-            "unplaced": [event_out(e) for e in loose], "marks": marks,
+            "unplaced": loose, "marks": marks, "overlaps": overlaps(decorated), "hypotheses": ready,
             "unplaced_note": "These events come from sources whose clock is not related to any other, or from statements with no usable time. They are not ordered against placed events.",
             "note": NOTE}
 
@@ -128,7 +152,11 @@ def event_detail(event_id: str, db: Session = Depends(get_db)) -> dict:
             return "overlapping"
         return "before" if a1 < b0 else "after"
     near = [{"id": x.id, "title": x.title, "relation": rel(x)} for x in comparables if abs(x.start_case_ms - e.start_case_ms) <= 3000][:20]
-    return event_out(e) | {"nearby": near, "note": NOTE}
+    scn = db.get(ReconstructionScenario, e.scenario_id)
+    case = db.get(Case, e.case_id)
+    decorated, _ctx = _decorate(db, case, scn, scn_rows)
+    body = next(item for item in decorated if item["id"] == e.id)
+    return body | {"nearby": near, "note": NOTE}
 
 
 @router.get("/events/{event_id}/summary")
@@ -227,6 +255,79 @@ def incident_frames(event_id: str = Query(...), scenario_id: str | None = None, 
     if item is None:
         raise AppError(404, "EVENT_NOT_FOUND", f"No incident event with id {event_id}")
     return {"event_id": event_id, "items": incident.frames_for(db, item)}
+
+
+def _association_out(row: VehicleAssociation) -> dict:
+    return {"id": row.id, "scenario_id": row.scenario_id, "status": row.status, "tracks": row.tracks,
+            "supporting": row.supporting, "contradicting": row.contradicting, "basis": row.basis, "probability": None}
+
+
+@router.get("/cases/{case_id}/associations")
+def list_associations(scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    scn = get_scenario(db, case, scenario_id)
+    rows = db.execute(select(VehicleAssociation).where(VehicleAssociation.scenario_id == scn.id).order_by(VehicleAssociation.id)).scalars()
+    return {"scenario_id": scn.id, "items": [_association_out(row) for row in rows]}
+
+
+class TrackRef(BaseModel):
+    evidence_id: str
+    track_id: int
+
+
+class AssociationBody(BaseModel):
+    scenario_id: str | None = None
+    tracks: list[TrackRef] = Field(min_length=2)
+    basis: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/cases/{case_id}/associations", status_code=201)
+def create_association(body: AssociationBody, case: Case = Depends(get_case), db: Session = Depends(get_db), who: str = Depends(get_actor)) -> dict:
+    """Investigator-proposed uncertain link. Does not confirm an actor and does not create a corroboration."""
+    scn = get_scenario(db, case, body.scenario_id)
+    if len({ref.evidence_id for ref in body.tracks}) < 2:
+        raise AppError(422, "ASSOCIATION_NEEDS_TWO_SOURCES", "An association needs tracks from two different sources")
+    stored = []
+    for ref in body.tracks:
+        ev = db.get(EvidenceFile, ref.evidence_id)
+        if ev is None or ev.case_id != case.id:
+            raise AppError(404, "EVIDENCE_NOT_FOUND", f"{ref.evidence_id} is not in this case")
+        track = db.execute(select(VehicleTrack).where(VehicleTrack.evidence_id == ref.evidence_id, VehicleTrack.track_id == ref.track_id)
+                           .order_by(VehicleTrack.id.desc())).scalars().first()
+        if track is None:
+            raise AppError(404, "TRACK_NOT_FOUND", f"No track {ref.track_id} on {ref.evidence_id}")
+        stored.append({"evidence_id": track.evidence_id, "track_id": track.track_id, "track_pk": track.id})
+    row = VehicleAssociation(
+        case_id=case.id, scenario_id=scn.id, status="uncertain", tracks=stored,
+        supporting=[{"kind": "investigator", "id": who, "evidence_id": None}], contradicting=[],
+        basis=body.basis, created_by=who,
+    )
+    db.add(row)
+    db.flush()
+    audit.record(db, actor=who, action="association_proposed", case_id=case.id, target_type="vehicle_association", target_id=row.id,
+                 details={"tracks": stored})
+    db.commit()
+    return {"item": _association_out(row)}
+
+
+@router.get("/cases/{case_id}/reconstruction/completeness")
+def reconstruction_completeness(scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    scn = get_scenario(db, case, scenario_id)
+    rows = _events(db, scn)
+    decorated, ctx = _decorate(db, case, scn, rows)
+    evidence = list(db.execute(select(EvidenceFile).where(EvidenceFile.case_id == case.id)).scalars())
+    video_ids = [ev.id for ev in evidence if ev.kind in ("cctv", "dashcam") and ev.status == "valid"]
+    track_count = db.execute(select(VehicleTrack.id).where(VehicleTrack.evidence_id.in_(video_ids or [""]))).all()
+    gaps = [{"id": g.id, "gap_type": g.gap_type, "scope": g.scope or {}} for g in db.execute(select(GapRecord).where(GapRecord.scenario_id == scn.id)).scalars()]
+    ann = {a.evidence_id: {"recording_start": a.recording_start, "recording_end": a.recording_end}
+           for a in db.execute(select(SourceAnnotation).where(SourceAnnotation.evidence_id.in_([ev.id for ev in evidence] or [""]))).scalars()}
+    build = (scn.assumptions or {}).get("build") or {}
+    cons = db.execute(select(Contradiction.id).where(Contradiction.scenario_id == scn.id)).all()
+    body = completeness(
+        decorated, {e["id"]: e for e in decorated},
+        [{"id": ev.id, "kind": ev.kind, "status": ev.status} for ev in evidence],
+        gaps, len(track_count), list(build.get("unsynchronized_sources") or []), ann, ctx, len(cons),
+    )
+    return {"scenario_id": scn.id, **body}
 
 
 def finding_out(f: InvestigationFinding) -> dict:

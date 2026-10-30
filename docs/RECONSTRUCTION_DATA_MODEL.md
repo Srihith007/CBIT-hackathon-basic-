@@ -143,4 +143,4 @@ Timeline gains `hypotheses`. One entry per inference event whose premises all ha
 
 ## What this model does not do
 
-No external camera lookup. No plate, make, or model. No legal fault. No probability on a hypothesis or an association. Synthetic evidence is still rejected on a `real` case before staging. A failed Featherless call does not write model sentences; see §7a and `docs/FEATHERLESS_INTEGRATION.md` when that note is added.
+No external camera lookup. No plate, make, or model. No legal fault. No probability on a hypothesis or an association. Synthetic evidence is still rejected on a `real` case before staging. A failed Featherless call does not write model sentences. The narrative document still includes `hypothesis_explanation` built from stored events. See `docs/INTEGRATION_CONTRACT.md` §7a and `docs/FEATHERLESS_INTEGRATION.md`.

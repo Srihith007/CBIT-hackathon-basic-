@@ -57,19 +57,19 @@ Routes today (`frontend/src/App.jsx`): `/` landing, `/dashboard`, `/new`, `/case
 |---|---|
 | More than one video on a case | Implemented and verified. Two real files with no sync edge stay unplaced (`docs/FINAL_BACKEND_AUDIT.md`). |
 | Source id | Implemented. `evidence_files.id` (`ev_…`). |
-| Kind CCTV or dashcam | Implemented. Chosen at upload. It is a declaration, not a measurement that the camera moved. |
+| Kind CCTV, dashcam, or other | Upload `kind` may be `cctv`, `dashcam`, or `other`. `other` is stored and validated and is not sent to detect or track. `camera_role` on the source annotation is editable and does not re-run tracking. The stored file kind stays immutable. |
 | Original filename | Implemented. Display only. Immutable with the evidence row. |
 | Original bytes preserved | Implemented and verified. `GET /evidence/{id}/original?verify=true` matched the selected file hash. Playback is a separate derived file. |
 | Duration, fps, coded size, rotation, container PTS | Implemented and verified on the real clips (`video_metadata`). |
-| Timezone column on video | Partial. `video_metadata.timezone` exists. The upload form does not collect it. Wall-clock recording time is not derived. `creation_time_claimed` is stored only when the container has that tag. |
-| Clock offset, editable later | Partial. `PUT /evidence/{id}/clock` stores `clock_offset_ms` and a basis. The workspace does not offer that editor. |
-| Location text for a camera | Not implemented. `cameras.label` exists. There is no location field on evidence or video metadata. |
-| Start and end as investigator-entered recording bounds | Not implemented. Duration comes from the file. |
-| Display name separate from the filename | Not implemented. |
+| Timezone on a source | Editable through `PATCH /evidence/{id}/source`. It is not inferred from the file. `creation_time_claimed` is still unverified container text. |
+| Clock offset, editable later | `PATCH /evidence/{id}/source` stores `clock_offset_ms` with a reference evidence id. The next scenario build applies edge `ann:{evidence_id}`. `PUT /evidence/{id}/clock` is unchanged. The workspace editor is frontend work. |
+| Location text for a camera | `source.location_text` on the source annotation. It is investigator text, not a looked-up camera. |
+| Start and end as investigator-entered recording bounds | `source.recording_start` and `source.recording_end`. File duration is separate. A window is compared with a trusted wall clock only. |
+| Display name separate from the filename | `source.display_name` is editable. `original_filename` stays the immutable upload name. |
 | Witness statements and text spans | Implemented, not verified on real footage. Claims store `statement_id`, `char_start`, `char_end`, and `source_text`. A live Featherless call was not made. |
 | Sensor CSV, column mapping, unit normalization, raw `t_raw` kept | Implemented, not verified on real footage. Fixture tests cover parsing. No sensor file was uploaded with the real clips. |
 | GPS | Partial. Sensor analysis can compare haversine speed between lat/lon columns and a speed column (`gps_consistency`). There is no GPS track page and no real GPS file was ingested. |
-| `docs/SENSOR_DATA_FORMAT.md` | Not implemented. Sensor behavior is described in `docs/SENSOR_PROCESSING_ARCHITECTURE.md`, which is an older design note, not this V2 format doc. |
+| `docs/SENSOR_DATA_FORMAT.md` | Written for the current parser. `docs/SENSOR_PROCESSING_ARCHITECTURE.md` remains the older design note. |
 
 ## Phase 5 — per-source detection, tracking, events
 
@@ -77,7 +77,7 @@ Routes today (`frontend/src/App.jsx`): `/` landing, `/dashboard`, `/new`, `/case
 |---|---|
 | Detections stored per evidence id | Implemented and verified on the real clips (YOLO26s, storage confidence 0.15, display default 0.25). |
 | Tracker ids scoped to one video and one run | Implemented. `tracking.py` states they never claim identity across cameras. ByteTrack for `cctv`, BoT-SORT for `dashcam`. Continuations are candidates and are not merged. |
-| Matching tracker ids across cameras | Not implemented. That is intentional. |
+| Matching tracker ids across cameras | Refused. `propose_cross_camera_matches` returns an empty list. Equal integers are not a match. |
 | Video events carry the evidence id | Implemented and verified. Types are the machine-detection set in `video_events.py` (`VIDEO_EVENTS_VERSION` 2). There is no event type `collision`. |
 | Speeds | Hardcoded unit choice: box diagonals per second, not metres per second. The number is measured. The unit is not a world speed. |
 | Accident cue | Implemented and verified as a separate model. It does not decide an event. |
@@ -92,21 +92,21 @@ Clocks that exist:
 | Media-relative milliseconds (`time_ms`, player `currentTime`) | Implemented and verified. |
 | Container PTS (`video_metadata.pts_start_ms`) | Implemented and verified. Frame times are relative to the first frame. PTS is kept beside that. |
 | Case-relative time (`start_ms` / `start_case_ms`) | Implemented and verified. A lone source is its own reference at offset 0. Two sources with no edge stay unsynchronized and unplaced. |
-| Estimated synchronized time | Partial. A confirmed sync edge places sources on one case clock. That is the sync solution, not a separate estimated-time field. |
-| Wall clock of the recording | Not implemented. A container creation tag is not treated as the recording clock. |
+| Estimated synchronized time | Implemented on timeline events as `clocks.synchronized_ms`. It equals case time only when the sync group has at least two members and is consistent. A lone source keeps `case_ms` and `synchronized_ms` null. |
+| Wall clock of the recording | Implemented as `clocks.wall_clock` only from a trusted clock record (`declared_by_investigator` or `simulation_clock`) plus media time. Embedded `creation_time_claimed` is not used. |
 
 | Capability | Class |
 |---|---|
 | Manual offsets | Partial. API `PUT /evidence/{id}/clock` and sync edges. No workspace control for typing an offset. |
 | Overlap, gap, and clock-inconsistency records | Implemented. Gap types include `video_missing_interval`, `sensor_missing_interval`, `unsynchronized_source`, `clock_inconsistency`, `no_camera_calibration`, `unconfirmed_vehicle_identity`, `tracking_fragmentation`, `low_visual_quality`, `untestable_claim`, `no_visual_coverage_at_candidate_collision`. Real-clip runs produced missing-interval, brightness, calibration, and identity gaps. A clock-inconsistency gap was not produced by those files. |
-| Cross-camera vehicle association as its own uncertain record | Not implemented. An investigator can confirm an `ActorLink`. Unconfirmed tracks stay class plus track id. There is no automatic cross-camera association row. |
-| Duplicate upload counted as corroboration | Not implemented, and the ingest path prevents a second evidence row for the same bytes in one case. Corroboration requires two different evidence ids (`engine_rules.corroborate`). |
-| Incomplete evidence | Partial. Gaps and unplaced events are stored and shown. There is no separate incomplete-evidence reconstruction mode and no `docs/INCOMPLETE_EVIDENCE_RECONSTRUCTION.md`. |
-| Competing hypotheses | Partial. Inference rows can carry an `alternatives` list from rule text. Those phrases are written in `engine_rules.py`. They are not probabilities. A hypothesis is not emitted unless a rule fired. |
+| Cross-camera vehicle association as its own uncertain record | Implemented. A row is created from confirmed actor links that span two evidence ids, or by `POST /cases/{id}/associations`. Status is `uncertain`. Equal tracker ids do not create a row. |
+| Duplicate upload counted as corroboration | Rejected. The same bytes return the existing evidence id (`duplicate: true`). Corroboration still requires two evidence ids. |
+| Incomplete evidence | Implemented as `GET /cases/{id}/reconstruction/completeness` and `docs/INCOMPLETE_EVIDENCE_RECONSTRUCTION.md`. `defensible` requires a placed event with a complete trace and a placeable evidence class. |
+| Competing hypotheses | Implemented on the timeline as `hypotheses` when an inference has a complete evidence trace and stored alternatives. `probability` is null. Incomplete premises are `unsupported_hypotheses`, not narrated. |
 | Invented probabilities | Not implemented. |
-| Contradiction versus missing evidence | Implemented as separate stores: contradictions and gaps. Cross-source contradiction rules were not exercised on the real clips because no sensor or witness was uploaded. The synthetic scenario packages that would exercise them were not in the checkout, so those tests were skipped. |
-| `docs/RECONSTRUCTION_DATA_MODEL.md` | Not implemented. The live model is the tables in `backend/app/models/` and `docs/INTEGRATION_CONTRACT.md`. |
-| Requested evidence-type names | Partial. Stored categories are `direct_observation`, `machine_detection`, `witness_claim`, `inference`. Source types include `sensor`. The names `witness_reported`, `sensor_observed`, `derived_observation`, `system_inference`, `hypothesis`, and `unknown` are not categories. Sensor readings use `direct_observation` plus `source_type` `sensor`. |
+| Contradiction versus missing evidence | Implemented as separate stores. Completeness lists gaps under `missing_evidence` and keeps `contradiction_count` apart. Synthetic fixtures cover a witness/camera conflict. The packaged reconstruction scenarios are still skipped. |
+| `docs/RECONSTRUCTION_DATA_MODEL.md` | Written. It matches the additive fields in `docs/INTEGRATION_CONTRACT.md` §14. |
+| Requested evidence-type names | Read-model `evidence_class`: `direct_observation`, `witness_reported`, `sensor_observed`, `derived_observation`, `system_inference`, `hypothesis`, `unknown`. Stored `category` is unchanged. |
 
 ## Phase 7 — Featherless
 
@@ -114,11 +114,11 @@ Clocks that exist:
 |---|---|
 | Witness claim extraction with statement id and text span | Implemented, not verified on a live model. The job calls Featherless or refuses. Span equality is enforced. Tests use a stand-in client. |
 | Incident narrative from stored scenario records only | Implemented. `incident.narrate` runs once at scenario build. Playback reads the stored document and does not call the model. |
-| Reject a sentence with no valid evidence id, banned wording, or an unsupported contact claim | Implemented and verified by `test_incident_analysis.py`. |
-| Failure leaves the deterministic summary and `ai_narrative` null | Implemented and verified with stand-in `NotConfigured` and `PolicyBlocked` clients, and on the rebuilt case (`policy_blocked`). The user-facing line is "AI narrative is unavailable." |
+| Reject a sentence with no valid evidence id, banned wording, an unsupported contact claim, or a hypothesis citation whose evidence ids do not match | Implemented and verified by `test_incident_analysis.py` with a stand-in client. |
+| Failure leaves the deterministic summary and `ai_narrative` null | Implemented and verified with stand-in `NotConfigured` and `PolicyBlocked` clients, and on the rebuilt case (`policy_blocked`). The user-facing line is "AI narrative is unavailable." `hypothesis_explanation.items` stays the stored list, which is empty when no complete inference exists. |
 | Key only from the environment | Implemented. `FEATHERLESS_API_KEY` is read from settings. `allow_external_inference` is checked before the key. |
 | Vision model on frames | Not implemented for the narrative. The configured vision model name is unused by that step. |
-| `docs/FEATHERLESS_INTEGRATION.md` | Not implemented. Behavior is in `backend/app/llm/featherless.py`, `backend/app/services/incident.py`, and `docs/INTEGRATION_CONTRACT.md` section 7a. |
+| `docs/FEATHERLESS_INTEGRATION.md` | Written from `backend/app/llm/featherless.py`, `backend/app/services/witness.py`, `backend/app/services/jobs.py`, and `backend/app/services/incident.py`. Live Featherless calls are not part of the test suite. |
 
 ## Phase 8 — investigator workspace
 
@@ -156,12 +156,12 @@ The merged workspace is one route. There is no second multi-angle page and no ev
 
 | Capability | Class |
 |---|---|
-| Backend pytest suite | Implemented and verified on this branch: 194 passed, 17 skipped, 0 failed. |
+| Backend pytest suite | Re-run from `backend/` after the scenario module: 246 passed, 19 skipped, 0 failed. The extra skips are browser seeking and timeline-video sync. The other 17 are the scenario packages and the accident-cue image split. `test_selected_accident_video_is_detected_tracked_and_reviewed` ran; the selected file was present. Synthetic scenario passes are not that result. |
 | Frontend vitest, 55 tests | Implemented and verified on this merge before the merge commit. |
-| The 24 V2 scenarios and 15 multi-camera scenarios | Not implemented. The named lists are not in the tree, so they were not written as tests and were not marked real or synthetic. |
+| The 24 V2 scenarios and 15 multi-camera scenarios | Backend fixtures are in `backend/tests/test_v2_scenarios.py`. They are synthetic. Real footage is only `test_real_video_pipeline.py`. Browser seeking and timeline-video sync are skipped for the frontend worker. |
 | Screenshots at 1366×768, 1440×900, and 1920×1080 for five pages, the guided flow, and complete versus incomplete cases | Not implemented for V2. Older Chrome shots exist: pipeline timeline shots described in `docs/FINAL_FRONTEND_AUDIT.md` Record A, and `docs/frontend/screenshots/` from `claude/final-audit` (Record B). Neither set is a V2 five-page pass. |
 | Safari and Firefox | Not run. |
 
 ## What later phases still have to build
 
-Phases 2 through 10 of the V2 summary are not done. The largest gaps are the five-page shell, editable source metadata (name, location text, recording bounds, timezone), a workspace offset editor, cross-camera association as uncertain records rather than confirmed links, the V2 evidence-type names, the three missing docs (`SENSOR_DATA_FORMAT.md`, `INCOMPLETE_EVIDENCE_RECONSTRUCTION.md`, `RECONSTRUCTION_DATA_MODEL.md`, `FEATHERLESS_INTEGRATION.md`), before/during/after and storyboard, and the scenario tests once the named lists are available. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.
+The frontend shell, before/during/after, storyboard, and browser scenario checks are still open. Backend source metadata, clocks, uncertain associations, evidence-class names, Featherless citation checks, and the backend docs named above are in this branch. Named backend scenarios are synthetic fixtures in `backend/tests/test_v2_scenarios.py`. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.

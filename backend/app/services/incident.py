@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.llm.featherless import LlmError, NotConfigured, PolicyBlocked
 from app.models import Case, Event, EventSummary, ExtractedFrame, GapRecord, ReconstructionScenario, SourceEvent
+from app.services.reconstruction_view import hypotheses as hypothesis_rows
 from app.services.report import BANNED
 
 # Strings already produced by engine_rules.build_summary. Copied, not rewritten.
@@ -303,9 +304,11 @@ def _is_method(text: str) -> bool:
     return _METHOD.search(text) is not None and not re.search(r"\b(collision|impact|contact|vehicle|track|proximity)\b", text, re.I)
 
 
-def validate_sentences(sentences: list, items: list[dict]) -> None:
+def validate_sentences(sentences: list, items: list[dict], hypotheses: list[dict] | None = None) -> None:
     """Reject the whole narrative. Do not rewrite a sentence."""
     by_id = {i["id"]: i for i in items}
+    for hyp in hypotheses or []:
+        by_id[hyp["id"]] = {"id": hyp["id"], "evidence_id": None, "evidence_ids": list(hyp.get("evidence_ids") or []), "event_type": "hypothesis"}
     visual = any(i["event_type"] == "visually_supported_contact" for i in items)
     if not isinstance(sentences, list) or not sentences:
         raise NarrativeInvalid("validation_failed")
@@ -334,6 +337,8 @@ def validate_sentences(sentences: list, items: list[dict]) -> None:
                 raise NarrativeInvalid("validation_failed")
             cited.append(by_id[eid])
         allowed_evidence = {c["evidence_id"] for c in cited if c.get("evidence_id")}
+        for cited_row in cited:
+            allowed_evidence.update(cited_row.get("evidence_ids") or [])
         if set(evidence_ids) != allowed_evidence or not allowed_evidence:
             raise NarrativeInvalid("validation_failed")
         if _bare_collision(text) and not any(c["event_type"] == "visually_supported_contact" for c in cited):
@@ -358,7 +363,21 @@ def parse_model_json(content: str) -> list:
     return sentences
 
 
-def _model_payload(view: dict) -> dict:
+HYPOTHESIS_NOTE = "Stored rule alternatives with evidence ids. No probability is assigned. A model sentence is kept only inside ai_narrative after those ids are checked."
+
+
+def hypothesis_explanation(db: Session, scn: ReconstructionScenario) -> dict:
+    events = list(db.execute(select(Event).where(Event.scenario_id == scn.id)).scalars())
+    plain = [{
+        "id": event.id, "category": event.category, "source_type": event.source_type, "source_id": event.source_id,
+        "title": event.title, "inference": event.inference, "provenance": event.provenance or {},
+        "observations": event.observations or {}, "start_ms": event.start_case_ms, "end_ms": event.end_case_ms,
+    } for event in events]
+    ready, _unsupported = hypothesis_rows(plain, {item["id"]: item for item in plain})
+    return {"items": ready, "note": HYPOTHESIS_NOTE}
+
+
+def _model_payload(view: dict, explanation: dict | None = None) -> dict:
     events = []
     for item in view["items"] + view["unplaced"]:
         events.append({
@@ -367,26 +386,33 @@ def _model_payload(view: dict) -> dict:
             "track_classes": item["track_classes"], "frames": item["frames"], "rule_id": item["why_generated"]["rule_id"],
             "observations": item["observations"],
         })
-    return {"events": events, "headline": view["deterministic"]["headline"], "contact_status": view["contact_status"]}
+    hyps = []
+    for item in (explanation or {}).get("items") or []:
+        hyps.append({"id": item["id"], "statement": item["statement"], "alternatives": item["alternatives"],
+                     "evidence_ids": item["evidence_ids"], "probability": None})
+    return {"events": events, "hypotheses": hyps, "headline": view["deterministic"]["headline"], "contact_status": view["contact_status"]}
 
 
 def narrate(db: Session, case: Case, scn: ReconstructionScenario, client, settings) -> dict:
     """One text-model call after the scenario exists. Failure keeps the deterministic summary."""
     view = view_for_scenario(db, scn)
+    explanation = hypothesis_explanation(db, scn)
     base = {
         "contact_status": view["contact_status"],
         "deterministic": view["deterministic"],
+        "hypothesis_explanation": explanation,
         "ai_narrative_status": "unavailable",
         "ai_narrative_reason": "request_failed",
         "ai_narrative": None,
     }
-    payload = _model_payload(view)
+    payload = _model_payload(view, explanation)
     messages = [
         {"role": "system", "content": (
             "Narrate only the JSON evidence. Every sentence that states a time, vehicle, movement, proximity, or contact "
             "must cite event_ids and evidence_ids copied from that JSON. Do not invent events, timestamps, plates, makes, or models. "
             "A possible_collision is a possible collision, never a collision, impact, or contact. "
             "Name visually supported contact only when that event_type is present. Do not assign fault. "
+            "Hypothesis ids in the JSON may be cited in event_ids. Copy evidence_ids from the cited rows exactly. Do not assign a probability. "
             "Return JSON {\"sentences\":[{\"text\",\"classification\",\"event_ids\",\"evidence_ids\"}]}."
         )},
         {"role": "user", "content": json.dumps(payload, sort_keys=True)},
@@ -411,7 +437,7 @@ def narrate(db: Session, case: Case, scn: ReconstructionScenario, client, settin
         return base
     try:
         sentences = parse_model_json(result.content)
-        validate_sentences(sentences, view["items"] + view["unplaced"])
+        validate_sentences(sentences, view["items"] + view["unplaced"], explanation["items"])
     except NarrativeInvalid:
         client.record_validation(db, result.call_id, False)
         base["ai_narrative_reason"] = "validation_failed"
@@ -471,12 +497,15 @@ def read_narrative(db: Session, scn: ReconstructionScenario) -> dict:
     """Stored at build time. A missing document is not a new model call."""
     stored = (scn.assumptions or {}).get("incident_narrative")
     if isinstance(stored, dict) and stored.get("deterministic"):
-        return {"scenario_id": scn.id, **stored}
+        doc = {"scenario_id": scn.id, **stored}
+        doc.setdefault("hypothesis_explanation", hypothesis_explanation(db, scn))
+        return doc
     view = view_for_scenario(db, scn)
     return {
         "scenario_id": scn.id,
         "contact_status": view["contact_status"],
         "deterministic": view["deterministic"],
+        "hypothesis_explanation": hypothesis_explanation(db, scn),
         "ai_narrative_status": "unavailable",
         "ai_narrative_reason": "request_failed",
         "ai_narrative": None,

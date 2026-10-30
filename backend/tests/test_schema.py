@@ -79,7 +79,7 @@ def commit_fails(s, codes=DB_REJECT):
 def test_all_tables_created(engine):
     with engine.connect() as c:
         n = c.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version'")).scalar()
-    assert n == 34
+    assert n == 36  # includes source_annotations and vehicle_associations
 
 
 def test_enum_checks_reject_bad_values(session):
