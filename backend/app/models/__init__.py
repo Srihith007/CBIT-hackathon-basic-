@@ -14,6 +14,7 @@ from app.models.ops import AuditLog, LlmCall, ProcessingJob  # noqa: F401
 from app.models.reconstruction import (  # noqa: F401
     Actor,
     ActorLink,
+    SourceAnnotation,
     Annotation,
     Contradiction,
     Corroboration,
@@ -25,5 +26,6 @@ from app.models.reconstruction import (  # noqa: F401
     Report,
     SyncGroup,
     Trajectory,
+    VehicleAssociation,
 )
 from app.models.engine import ClockRecord, GapRecord, SourceEvent, SyncEdge  # noqa: E402,F401

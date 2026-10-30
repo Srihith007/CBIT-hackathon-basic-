@@ -234,7 +234,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
   const inside = shift != null && (() => { const m = currentMs * 250 + shift; return m >= 0 && m <= v.video.duration_ms; })();
   return (
     <figure className="card overflow-hidden" data-primary={primary ? '1' : undefined}>
-      <div className="relative mx-auto bg-black" style={{ aspectRatio: `${v.video.width} / ${v.video.height}`, width: primary ? `min(100%, ${(40 * v.video.width / v.video.height).toFixed(1)}vh)` : '100%' }}>
+      <div className="relative mx-auto w-full bg-black [@media(max-height:1100px)]:max-h-[32vh] [@media(min-height:1101px)]:max-h-[min(52vh,560px)]" style={{ aspectRatio: `${v.video.width} / ${v.video.height}`, maxWidth: primary ? `min(100%, ${(40 * v.video.width / v.video.height).toFixed(1)}vh)` : '100%' }}>
         <video ref={(el) => { video.current = el; setRef(el); }} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
         {shift == null && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">Not synchronized: no recorded clock relation. Not slaved to the case clock.</div>}

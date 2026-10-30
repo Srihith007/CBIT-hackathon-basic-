@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Badge, Card } from '../ui-kit';
 import { api } from '../api';
 
-function Statement({ st, label }) {
+export function Statement({ st, label }) {
   const [claims, setClaims] = useState([]);
   useEffect(() => { api.claims(st.id).then((r) => setClaims(r.items)).catch(() => {}); }, [st.id]);
   const spans = claims.map((c) => [c.explicit_statement.char_start, c.explicit_statement.char_end, c]).sort((a, b) => a[0] - b[0]);

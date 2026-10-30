@@ -42,11 +42,14 @@ HTTP statuses used: 400, 403, 404, 409, 422, 500, 503. Codes the frontend relies
 | status | string | no | `open`\|`processing`\|`review`\|`closed` | system |
 | designation | string | no | `real`\|`staged`\|`synthetic`\|`mixed`. Real and synthetic cases are separate cases. | reported |
 | allow_external_inference | bool | no | if false no content leaves the machine | reported |
+| incident_at | string | **yes** | ISO-8601 with a timezone offset. Investigator-stated instant. Not read from a file and not used to choose frames. A value without an offset is 422 `INCIDENT_TIMEZONE_REQUIRED` | reported |
+| incident_at_note | string | no | Fixed sentence: a timezone offset is required on write. The server does not assume one | system |
+| location_text | string | **yes** | Investigator place text, at most 500 characters. Not a geocode and not a discovered camera | reported |
 | created_at, updated_at | string | no | ISO-8601 UTC, system time (wall_clock of the *record*) | system |
 | counts.evidence_total/valid/invalid/pending | int | no | files | system |
 | counts.jobs_active, jobs_failed | int | no | | system |
 | counts.findings_unreviewed | int | no | | system |
-`POST /cases` body: `{title, designation, description?, allow_external_inference?, code?}` → 201 Case.
+`POST /cases` body: `{title, designation, description?, allow_external_inference?, code?, incident_at?, location_text?}`. `PATCH /cases/{id}` accepts those two fields as well as the existing title, description, status, and allow_external_inference. An omitted field is left as stored. `null` clears `incident_at` or `location_text`. Existing cases read back with both values null until set. → 201 Case on create.
 
 ## 2. Evidence — `GET /cases/{id}/evidence` → `{"items":[Evidence]}`; `POST /cases/{id}/evidence` (multipart: `file`, `kind`, `synthetic` required) → 201 `{evidence, duplicate, ...}`
 | Field | Type | Null | Notes | Basis |
@@ -71,7 +74,7 @@ HTTP statuses used: 400, 403, 404, 409, 422, 500, 503. Codes the frontend relies
 |---|---|---|---|---|
 | duration_ms | int | yes | media_ms | observed |
 | fps_nominal, fps_measured | float | yes | frames/s; measured from PTS | observed |
-| width, height | int | yes | pixels, **after** applying rotation metadata | observed |
+| width, height | int | yes | pixels of the container stream as ffprobe reports them. `rotation` is separate and is not applied to these numbers or to detection boxes | observed |
 | codec | string | yes | | observed |
 | rotation | int | yes | degrees (null = none) | observed |
 | frame_count | int | yes | | observed |
@@ -88,11 +91,21 @@ Frames: `GET /evidence/{id}/frames?from_ms&to_ms&sampled=true&limit` → `{evide
 | evidence_id | string | yes | null for case-level jobs | system |
 | stage | string | no | `validate`\|`preprocess`\|`extract_interval`\|`detect`\|`track`\|`extract_claims` | system |
 | status | string | no | **exactly** `pending`\|`validating`\|`processing`\|`completed`\|`failed`\|`partially_completed`. Active = pending, validating, processing. | system |
-| progress | float | no | 0..1; **reported by the job, not estimated by the UI** | system |
+| progress | float | no | 0..1 **within this stage**, from work already finished. See the paragraph under this table. The UI must not invent a timer. | system |
 | attempts | int | no | | system |
 | error | string | yes | set when failed | system |
 | params, result | object | yes | stage-specific; `result.warnings[]` for partial results | system |
 | created_at, started_at, finished_at | string | yes (started/finished) | ISO UTC | system |
+`progress` is the fraction of that stage's planned work that has already finished. It is not elapsed time. While the stage is `validating` or `processing`, the stored value is capped at 0.99. The runner writes 1.0 only when `status` becomes `completed` or `partially_completed`. A `failed` job keeps the last published fraction, or 0 if the stage had not reported any unit yet.
+
+| Stage | Unit |
+|---|---|
+| validate, extract_claims | no intermediate units; stays 0 until the runner writes 1.0 |
+| preprocess | container frames grabbed / (container frame count + 1). The last unit is the playback copy |
+| extract_interval | frames decoded in the requested interval / frames indexed in that interval |
+| detect | `(pass_index + frames_inferred / frames_in_pass) / pass_count`. A pass whose result is reused counts as finished. A missing accident-weight file is not counted as a pass that ran |
+| track | sampled frames handed to the tracker / sampled frames |
+
 Pipeline: upload → validate → preprocess → detect → track run automatically (chained). `POST /cases/{id}/process` body `{stages:[preprocess|detect|track], sample_fps?, max_frames?, chain_detect?}` → 202 `{jobs:[Job], skipped_note}`.
 
 ## 5. Detection — `GET /evidence/{id}/detections?from_ms&to_ms&classes&min_conf&model_run_id&include_accident_cue&include_empty`
@@ -106,7 +119,7 @@ Pipeline: upload → validate → preprocess → detect → track run automatica
 | detections[].id | int | no | | system |
 | .class | string | no | `car`\|`truck`\|`bus`\|`motorcycle`\|`bicycle`\|`pedestrian`\|`traffic_light`\|`accident_cue` | observed |
 | .confidence | float | no | 0..1, **not** a calibrated probability | observed |
-| .bbox | [x1,y1,x2,y2] float | no | pixels of the oriented frame (`frame_size`) | observed |
+| .bbox | [x1,y1,x2,y2] float | no | pixels of the upright decoded frame (`frame_size`), the same grid as `/stream`. A display rotation of 90° or 270° is applied once, so `frame_size` is swapped relative to coded `video.width` / `video.height`. 180° does not swap. The playback file is not scaled and does not keep a second display matrix | observed |
 | .model_run_id | string | no | links to `model_runs` | system |
 | .category | string | no | always `machine_detection` | observed |
 | .is_accident_cue | bool | no | weak single-class model; never establishes a collision | observed |
@@ -143,7 +156,17 @@ Reconstruction must exist (else 409 `NO_RECONSTRUCTION`). `scenario_id` omitted 
 | span_ms | int[2] | elements null if no placed events | **case_ms** |
 | lanes | object | no | keys present only if non-empty; events here have non-null `start_ms` |
 | unplaced | Event[] | no | **no usable time**; never ordered against placed events |
-Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`.
+A lone video or sensor is its own reference clock: offset 0, one sync group, `unsynchronized_sources` empty, and its events are placed with `start_ms` equal to that file's own time. Two or more sources with no recorded edge stay in `unsynchronized` and their events stay in `unplaced`. That rule is in `sync.solve`. It is not a measured alignment between cameras.
+
+Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`. `links.stream` is a playback copy that starts at media time 0 (`setpts=PTS-STARTPTS` when the original is transcoded; a remux only when the file is already H.264 yuv420p MP4, upright, and already starts at 0). Height is not capped. A 90/180/270 display matrix is baked into that file once. Any other angle is rejected at validation (`Display rotation N° cannot be applied`).
+
+## 7a. Incident analysis — added reads; existing timeline and event fields are unchanged
+
+`GET /cases/{id}/incident-events?scenario_id` returns 409 `NO_RECONSTRUCTION` when no scenario exists. Body: `{scenario_id, contact_status, provenance, items[], unplaced[]}`. `contact_status` is `possible_collision`, `visually_supported_contact`, or `insufficient_evidence`. An empty candidate list is `insufficient_evidence`. `none` is not returned for that list. `display` on an item is `amber` only for `possible_collision`, `critical` only for `visually_supported_contact`, otherwise `neutral`. Current video rules do not emit `visually_supported_contact`. `merged_from` lists the source-event ids that were folded into the row. The payload has no plate, make, or model keys. `track_classes` are detector classes. Overlap without a speed drop stays `potential_interaction` with `display: neutral`.
+
+`GET /cases/{id}/incident-narrative?scenario_id` is read-only. The document is written when the scenario is built and is not requested from the player. `{scenario_id, contact_status, deterministic{headline, sentences[{text, classification, event_ids, evidence_ids}]}, hypothesis_explanation, ai_narrative_status, ai_narrative_reason, ai_narrative}`. `deterministic` is always present. `hypothesis_explanation` is `{items, note}`. `items` are stored inference alternatives that already have a complete evidence trace (`id`, `evidence_class` `hypothesis`, `statement`, `alternatives`, `premises`, `evidence_ids`, `probability`). `probability` is always null. The note is fixed text, not model output. `ai_narrative` is null unless `ai_narrative_status` is `ready`, in which case it is `{model, model_run_id, sentences[]}`. A model sentence may cite a hypothesis id only when `evidence_ids` equal the evidence ids of every cited row. A sentence with no ids, an unknown id, or a different id set is rejected and the model text is not stored. Reason codes when unavailable: `not_configured`, `policy_blocked`, `request_failed`, `validation_failed`. A failed model call does not replace the deterministic headline and does not store model sentences. `hypothesis_explanation` is still returned; it is built from stored events. Details are in `docs/FEATHERLESS_INTEGRATION.md`.
+
+`GET /cases/{id}/incident-frames?scenario_id&event_id` returns `{event_id, items:[{evidence_id, frame_id, frame_no, time_ms, thumbnail_url, full_url}]}`. Items are extracted frames whose `frame_no` is an endpoint on the event. A missing index row is omitted. The route does not create a JPEG.
 
 ## 8. Event — items of `lanes`/`unplaced`; `GET /events/{id}` adds `nearby[]` and `note`; `GET /events/{id}/summary`
 | Field | Type | Null | Unit / convention | Basis |
@@ -202,7 +225,7 @@ Gaps between samples are **not** interpolated by the backend.
 Details by `ref_ids[0]`: `GET /cases/{id}/contradictions` → `{items:[{id, rule_id, event_a, event_b, strength(clear|marginal), basis{…, benign_explanations[]}, explanation, unresolved_questions[], review_status}]}`; `/corroborations` → `{items:[{id, rule_id, events[], independent, independence_reason, temporal_relation, explanation, review_status}]}`; `/gaps` → `{items:[{id, gap_type, scope{evidence_id?, case_from_ms?, case_to_ms?, …}, details, recommendation, refs[]}]}` (`scope.case_*_ms` are **case_ms**).
 
 ## 11. Other endpoints the frontend uses (shapes unchanged)
-Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` → `{id, version, validation{passed, checks[]}, has_pdf, content}`, `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
+Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` body `{scenario_id?, format?}`. Request `format` is `full` (default, 16-section technical dossier, unchanged) or `investigator` (four sections, the executive report; see `docs/REPORT_FORMAT.md`). Create and detail responses are unchanged. `GET /cases/{id}/reports` items add `format`: `executive` when the stored document says `investigator`, otherwise `full` (including documents written before a format key existed). The list does not include `content`. `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
 
 ## 12. Frontend consumption (Claude) — what is wired and what is not
 Wired to real endpoints: dashboard, case list, workspace (evidence, actors, scenarios, timeline, contradictions, corroborations, gaps, findings, trajectories, seek, overlays, sensor-records, summaries, witnesses/claims), report generate/view, upload + job polling + scenario build.
@@ -210,13 +233,45 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 **Known frontend defects against this contract:** none open. (Fixed: upload polling used non-existent job statuses.) Frontend usage notes are in `docs/frontend/FRONTEND_INTEGRATION_HANDOFF.md`.
 
 ## 13. Requests from frontend to backend (not changes; need agreement before implementation)
-1. **Job progress detail:** an optional `stage_label` or percent per stage so the upload page can show real progress. Today `progress` exists but its meaning per stage is undocumented. Please document it or confirm it is 0..1 within the stage.
-2. **Accident-moment events for real video:** the workspace shows summaries at event timestamps. For real footage it needs `possible_collision` events (media_ms and, for a single video, case_ms with the video as its own reference clock, already implemented). Please confirm that detection thresholds are being tuned on real clips and that no event is emitted without the supporting track evidence.
-3. **Uploaded-video metadata:** `video.pts_start_ms` is returned; please confirm `links.stream` playback copies always start at media 0.
+1. **Job progress detail:** answered in §4. `progress` is 0..1 within the current stage, from frames actually handled. No new field. There is no `stage_label`.
+2. **Accident-moment events for real video:** source events come from `video_events.py` on the tracking run. `possible_collision` requires image-space proximity and an abrupt speed drop; the stored note says that overlap is not physical contact. Thresholds were not lowered for the real clip (storage confidence 0.15, display default 0.25). A single uploaded video is its own reference clock, so those events are placed with `start_ms` equal to media time.
+3. **Uploaded-video metadata:** confirmed in §7. `links.stream` starts at media time 0. `video.pts_start_ms` remains the container PTS of the original's first frame.
 4. **Activity/audit feed, cross-case jobs and findings lists** for the dashboard (`GET /activity`, `GET /jobs?status=`, `GET /findings?review_status=`): today the UI fans out per case.
 5. **A job/stage list per evidence** (`GET /evidence/{id}/jobs`) would remove client-side filtering; optional.
+
+## 14. V2 reconstruction reads and source metadata (additive)
+
+The field lists are in `docs/RECONSTRUCTION_DATA_MODEL.md`. This section names the routes. No existing key is renamed, removed, or given a new unit. Clients that ignore unknown keys keep working.
+
+| Route | Change |
+|---|---|
+| `GET /cases/{id}/evidence`, `GET /evidence/{id}`, upload response `evidence` | Adds `source`. `video` is unchanged |
+| `PATCH /evidence/{id}/source` | New. Body is a subset of the editable source fields. Returns the evidence object, including `source` |
+| `POST /cases/{id}/evidence` | `kind` may be `other` (video bytes, not sent to detect/track). Same-bytes duplicate response is unchanged (`200`, `duplicate: true`) |
+| `GET /cases/{id}/timeline` | Each event gains `evidence_class`, `clocks`, `trace`. The payload gains `overlaps` and `hypotheses`. `lanes`, `unplaced`, `start_ms`, `end_ms`, `marks` are unchanged |
+| `GET /events/{id}` | Same three event fields. `nearby` is unchanged |
+| `GET /cases/{id}/associations?scenario_id` | New. `{scenario_id, items}` |
+| `POST /cases/{id}/associations` | New. `201` `{item}`. Status is always `uncertain`. Does not create a corroboration |
+| `GET /cases/{id}/reconstruction/completeness?scenario_id` | New. See the data-model doc |
+| Incident routes in §7a | `incident-narrative` adds `hypothesis_explanation`. Clocks are on the timeline event, not copied onto incident cards |
+| Report `POST` | Unchanged. Default request format remains `full` |
+| `GET /cases/{id}/reports` | Each item adds `format`: `executive` or `full`. `content` stays off the list |
+| `GET /cases/{id}/storyboard?scenario_id` | New. Stored frame references around each video event. See the data-model doc |
+| Case create, read, and `PATCH` | Add nullable `incident_at`, `incident_at_note`, and `location_text` |
+
+`PATCH` error codes: `RECORDING_WINDOW` (422), `OFFSET_REFERENCE_REQUIRED` (422), `EVIDENCE_NOT_FOUND` (404), `CAMERA_ROLE_INVALID` (422). Association `POST` uses `TRACK_NOT_FOUND` (404) and `ASSOCIATION_NEEDS_TWO_SOURCES` (422).
+
+A source annotation offset is applied only when a scenario is built after the patch, as edge id `ann:{evidence_id}`. `PUT /evidence/{id}/clock` and `POST /cases/{id}/sync-edges` are unchanged.
+
+There is no breaking change in this section.
 
 ## Change log
 | Date | Change | Proposed by | Agreed by |
 |---|---|---|---|
-| (initial) | Baseline documented from commit 76cec77 | Claude | pending Cursor |
+| (initial) | Baseline documented from commit 76cec77 | Claude | Cursor, with the corrections in the next row |
+| 2026-10-30 | `progress` defined per stage. `width`/`height` and `bbox` are unrotated container/decoded pixels. Lone source is its own reference clock. Playback copy starts at media 0. No response field added or renamed. | Cursor | |
+| 2026-10-30 | Playback is no longer scaled to 1080. `bbox` / `frame_size` are the upright frame, matching `/stream`. `video.width` / `video.height` stay the coded size. Optional report `format` defaults to `full`. No response field renamed. | Cursor | |
+| 2026-10-30 | Added `GET /cases/{id}/incident-events`, `/incident-narrative`, and `/incident-frames`. No field on timeline, event, or event summary was renamed. Report `format` still defaults to `full`. | Cursor | |
+| 2026-10-30 | §14 and `docs/RECONSTRUCTION_DATA_MODEL.md`. Additive `source`, `clocks`, `evidence_class`, `trace`, `overlaps`, `hypotheses`, associations, and completeness. No existing field renamed. | Cursor | |
+| 2026-10-30 | `incident-narrative` adds `hypothesis_explanation`. Existing narrative keys are unchanged. A rejected model sentence is not stored. | Cursor | |
+| 2026-10-30 | Cases gain nullable `incident_at` (offset required) and `location_text`. Report lists add `format` `executive` or `full`. `GET /cases/{id}/storyboard` cites stored frames. No existing key renamed. | Cursor | |

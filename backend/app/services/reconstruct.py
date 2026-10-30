@@ -16,9 +16,13 @@ from sqlalchemy.orm import Session
 from app.db import new_id
 from app.models import (Actor, ActorLink, Camera, Case, Contradiction, Corroboration, Event, EventSource, EventSummary, EvidenceFile,
                         ExtractedFrame, GapRecord, InvestigationFinding, ModelRun, ReconstructionScenario, SensorRecord, SensorSource,
-                        SourceEvent, Trajectory, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
+                        SourceAnnotation, SourceEvent, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata, Witness, WitnessClaim, WitnessStatement)
 from app.models.engine import ClockRecord, SyncEdge
-from app.services import audit, engine_rules as rules, geometry, sync
+from app.config import get_settings
+from app.llm.featherless import FeatherlessClient
+from app.services import audit, engine_rules as rules, geometry, incident, sync
+from app.services.reconstruction_view import associations_from_links
+from app.services.sources import annotation_edges
 
 ENGINE_VERSION = "1"
 TIME_WORDS = [
@@ -86,6 +90,11 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
               for c in db.execute(select(ClockRecord).where(ClockRecord.case_id == case.id)).scalars()]
     edges = [{"id": e.id, "a_evidence": e.a_evidence, "b_evidence": e.b_evidence, "offset_ms": e.offset_ms, "bound_ms": e.bound_ms, "basis": e.basis, "status": e.status}
              for e in db.execute(select(SyncEdge).where(SyncEdge.case_id == case.id)).scalars()]
+    ann_rows = db.execute(select(SourceAnnotation).where(SourceAnnotation.evidence_id.in_(list(media) or [""]))).scalars()
+    edges.extend(annotation_edges([
+        {"evidence_id": a.evidence_id, "clock_offset_ms": a.clock_offset_ms, "clock_offset_reference_id": a.clock_offset_reference_id}
+        for a in ann_rows if a.clock_offset_reference_id in media and a.evidence_id in media
+    ]))
     solved = sync.solve([{"id": i, "kind": e.kind} for i, e in media.items()], clocks, edges, reference=asm["reference"], edge_offsets=asm["edge_offsets"],
                         exclude_edges=set(asm["exclude_edges"]))
     lk = sync.lookup(solved)
@@ -237,6 +246,19 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         c["id"] = row.id
     for c, row in zip(corr["corroborations"], crb_rows):
         c["id"] = row.id
+    if actors:
+        link_rows = db.execute(select(ActorLink).where(
+            ActorLink.actor_id.in_(list(actors)), ActorLink.status == "confirmed", ActorLink.ref_type == "track")).scalars()
+        for payload in associations_from_links(
+            [{"pk": t.id, "evidence_id": t.evidence_id, "track_id": t.track_id} for t in track_rows],
+            [{"id": link.id, "actor_id": link.actor_id, "ref_id": link.ref_id} for link in link_rows],
+            [{"id": row.id, "event_a": row.event_a, "event_b": row.event_b} for row in con_rows],
+            {item["id"]: item["evidence_id"] for item in events},
+        ):
+            db.add(VehicleAssociation(
+                case_id=case.id, scenario_id=scn.id, status="uncertain", tracks=payload["tracks"],
+                supporting=payload["supporting"], contradicting=payload["contradicting"], basis=payload["basis"], created_by=who,
+            ))
 
     # ---- gaps
     facts = _gap_facts(db, case, media, lk, solved, events, tracks_pk, track_rows, conf, cand, corr, labels, evs)
@@ -275,10 +297,14 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         finding("open_question", q["refs"] or [q["event"]], q["text"])
     for e in inf_events:
         finding("inference", [e["id"]], e["statement"])
+    db.flush()
+    settings = get_settings()
+    narrative = incident.narrate(db, case, scn, FeatherlessClient(settings), settings)
     scn_counts = {"events": len(events) + len(inf_events), "contradictions": len(con_rows), "corroborations": len(crb_rows), "gaps": len(gap_rows), "trajectories": n_traj,
                   "open_questions": len(questions), "findings": n_find, "inferences": len(inf_events), "sync_groups": len(solved["groups"]),
                   "unsynchronized_sources": solved["unsynchronized"], "sync_inconsistencies": len(solved["inconsistencies"])}
-    scn.assumptions = asm | {"build": scn_counts, "sync_solution": solved, "engine_version": ENGINE_VERSION, "rules_version": rules.RULES_VERSION}
+    scn.assumptions = asm | {"build": scn_counts, "sync_solution": solved, "engine_version": ENGINE_VERSION, "rules_version": rules.RULES_VERSION,
+                             "incident_narrative": narrative}
     audit.record(db, actor=who, action="reconstruction_built", case_id=case.id, target_type="scenario", target_id=scn.id, details=scn_counts | {"unsynchronized_sources": len(solved["unsynchronized"])})
     return scn_counts
 

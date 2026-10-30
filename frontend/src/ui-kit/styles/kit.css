@@ -62,20 +62,20 @@
 
 :root,
 [data-theme='dark'] {
-  /* Graphite + signal cyan: near-black neutrals with a faint cool cast, one electric accent, dark ink on filled accent. */
+  /* Navy + graphite with cyan and teal accents: cool dark surfaces, subtle borders, dark ink on filled accent. */
   color-scheme: dark;
-  --bg: 8 9 11;
-  --surface: 14 16 19;
-  --surface-2: 21 24 28;
-  --line: 37 41 47;
-  --fg: 244 246 248;
-  --fg-2: 160 168 178;
-  --fg-3: 122 130 141;
+  --bg: 7 11 19;
+  --surface: 12 18 30;
+  --surface-2: 18 26 41;
+  --line: 32 44 62;
+  --fg: 238 243 249;
+  --fg-2: 156 169 188;
+  --fg-3: 120 135 156;
   --accent: 34 211 238;
   --accent-text: 103 232 249;
   --accent-fg: 4 18 24;
-  --accent-deep: 96 224 244;
-  --accent-2: 163 230 53;
+  --accent-deep: 20 184 166;
+  --accent-2: 45 212 191;
   --success: 52 211 153;
   --warning: 251 191 36;
   --danger: 248 113 113;

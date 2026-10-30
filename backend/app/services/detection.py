@@ -53,8 +53,10 @@ def run_model(model, images: list[np.ndarray], *, imgsz: int, conf: float, devic
     return out, dropped
 
 
-def detect_stream(frames, model, *, imgsz: int, conf: float, device: str, keep: dict[str, str], stats: dict, batch: int = 8):
-    """Consume (frame_index, image) pairs and yield (frame_index, boxes). Updates the caller's `stats` dict in place."""
+def detect_stream(frames, model, *, imgsz: int, conf: float, device: str, keep: dict[str, str], stats: dict, batch: int = 8, progress=None):
+    """Consume (frame_index, image) pairs and yield (frame_index, boxes). Updates the caller's `stats` dict in place.
+
+    `progress(done)` is called after each inferred batch with the number of frames actually inferred. It is not a clock."""
     stats.update({"frames": 0, "boxes": 0, "dropped_other_classes": 0, "seconds": 0.0})
     buf_idx, buf_img = [], []
 
@@ -69,6 +71,8 @@ def detect_stream(frames, model, *, imgsz: int, conf: float, device: str, keep: 
             yield i, b
         buf_idx.clear()
         buf_img.clear()
+        if progress is not None:
+            progress(stats["frames"])
 
     for i, img in frames:
         buf_idx.append(i)

@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.errors import AppError
 from app.models import Detection, EvidenceFile, ExtractedFrame, ModelRun, VideoMetadata
 from app.services import audit, jobs
+from app.services.video import display_size
 
 router = APIRouter(tags=["detections"])
 DETECTION_STAGES = ("detect", "accident_cue")
@@ -46,7 +47,7 @@ def detections(from_ms: int = Query(0, ge=0), to_ms: int | None = Query(None, ge
                min_conf: float = Query(0.25, ge=0, le=1, description="display threshold; boxes down to the storage threshold exist"),
                include_accident_cue: bool = True, model_run_id: str | None = None, include_empty: bool = False,
                ev: EvidenceFile = Depends(get_evidence), db: Session = Depends(get_db)) -> dict:
-    """Machine detections per sampled frame. Coordinates are pixels of the original frame (after rotation metadata is applied)."""
+    """Machine detections per sampled frame. Coordinates are pixels of the frame OpenCV decoded. video.rotation is reported separately and is not applied to these boxes."""
     if ev.kind not in ("dashcam", "cctv"):
         raise AppError(400, "NOT_A_VIDEO", "Detections exist only for dashcam/cctv evidence")
     if model_run_id:
@@ -78,7 +79,11 @@ def detections(from_ms: int = Query(0, ge=0), to_ms: int | None = Query(None, ge
     vm = db.get(VideoMetadata, ev.id)
     items = sorted(({"frame_id": fid, "frame_no": frames[fid].frame_no, "time_ms": frames[fid].time_ms, "detections": dets}
                     for fid, dets in per_frame.items()), key=lambda x: x["frame_no"])
-    return {"evidence_id": ev.id, "frame_size": {"width": vm.width, "height": vm.height} if vm else None, "min_confidence": min_conf,
+    frame_size = None
+    if vm is not None:
+        fw, fh = display_size(vm.width, vm.height, vm.rotation)
+        frame_size = {"width": fw, "height": fh}
+    return {"evidence_id": ev.id, "frame_size": frame_size, "min_confidence": min_conf,
             "frames_considered": len(frames), "model_runs": [_run_out(r) for r in runs.values()], "items": items,
             "note": "Machine detections. The accident cue is a weak single-class model and never establishes a collision by itself."}
 

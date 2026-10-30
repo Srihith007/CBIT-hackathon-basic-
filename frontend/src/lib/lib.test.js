@@ -136,3 +136,18 @@ describe('latest-wins seeking', () => {
     expect(useWorkspace.getState()).toMatchObject({ activeEventId: 'evt1', pinnedId: 'evt1', pinnedAt: 4600 });
   });
 });
+
+import { formatIncidentAt, splitIncidentAt, toIncidentAt } from './incident';
+describe('incident time keeps the stated offset', () => {
+  it('builds the API value only with an offset and never assumes one', () => {
+    expect(toIncidentAt('2026-10-30T10:32', '+05:30')).toBe('2026-10-30T10:32:00+05:30');
+    expect(toIncidentAt('', '+05:30')).toBeNull();
+    expect(() => toIncidentAt('2026-10-30T10:32', '')).toThrow(/time zone offset/);
+  });
+  it('shows a stored value with its own offset, without converting zones', () => {
+    expect(splitIncidentAt('2026-10-30T10:32:00+05:30')).toEqual({ local: '2026-10-30T10:32', offset: '+05:30' });
+    expect(formatIncidentAt('2026-10-30T10:32:00+05:30')).toBe('2026-10-30 10:32 (UTC+05:30)');
+    expect(formatIncidentAt(null)).toBeNull();
+    expect(formatIncidentAt('garbage')).toBeNull();
+  });
+});

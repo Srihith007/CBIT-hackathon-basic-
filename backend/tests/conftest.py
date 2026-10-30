@@ -44,9 +44,13 @@ def test_url() -> str:
 @pytest.fixture(scope="session")
 def engine(test_url):
     cfg = _alembic_cfg(test_url)
+    eng = create_engine(test_url, future=True)
+    with eng.begin() as conn:
+        tables = conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version'")).scalars().all()
+        if tables:
+            conn.execute(text("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE"))
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
-    eng = create_engine(test_url, future=True)
     yield eng
     eng.dispose()
 

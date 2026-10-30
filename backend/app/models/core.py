@@ -26,6 +26,8 @@ class Case(Base):
     status: Mapped[str] = mapped_column(String(20), default="open")
     designation: Mapped[str] = mapped_column(String(20))
     allow_external_inference: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    incident_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    location_text: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

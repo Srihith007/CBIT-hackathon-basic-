@@ -1,4 +1,5 @@
 import secrets
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -24,6 +25,8 @@ class CaseCreate(BaseModel):
     designation: Literal["real", "staged", "synthetic", "mixed"]
     allow_external_inference: bool = False
     code: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{3,40}$")
+    incident_at: datetime | None = None
+    location_text: str | None = Field(default=None, max_length=500)
 
 
 class CasePatch(BaseModel):
@@ -31,6 +34,16 @@ class CasePatch(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     status: Literal["open", "processing", "review", "closed"] | None = None
     allow_external_inference: bool | None = None
+    incident_at: datetime | None = None
+    location_text: str | None = Field(default=None, max_length=500)
+
+
+def _require_timezone(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        raise AppError(422, "INCIDENT_TIMEZONE_REQUIRED", "incident_at must include a timezone offset. The server does not assume one.")
+    return value
 
 
 def case_counts(db: Session, case_id: str) -> dict:
@@ -48,7 +61,8 @@ def create_case(body: CaseCreate, db: Session = Depends(get_db), actor: str = De
     for _ in range(5):
         code = body.code or f"TL-{secrets.token_hex(3).upper()}"
         case = Case(code=code, title=body.title, description=body.description, designation=body.designation,
-                    allow_external_inference=body.allow_external_inference)
+                    allow_external_inference=body.allow_external_inference, incident_at=_require_timezone(body.incident_at),
+                    location_text=body.location_text)
         db.add(case)
         try:
             db.flush()
@@ -81,6 +95,8 @@ def get_case_detail(case: Case = Depends(get_case), db: Session = Depends(get_db
 @router.patch("/cases/{case_id}")
 def patch_case(body: CasePatch, case: Case = Depends(get_case), db: Session = Depends(get_db), actor: str = Depends(get_actor)) -> dict:
     changes = body.model_dump(exclude_unset=True)
+    if "incident_at" in changes:
+        changes["incident_at"] = _require_timezone(changes["incident_at"])
     before = {k: getattr(case, k) for k in changes}
     for k, v in changes.items():
         setattr(case, k, v)

@@ -1,13 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell, Brand, Button, CommandPaletteProvider, MobileNav, Sidebar, ThemeSwitcher, Topbar, useCommandPalette } from './ui-kit';
-import { FilePlus2, FolderSearch, LayoutDashboard, Search } from 'lucide-react';
+import { FilePlus2, FileText, FolderSearch, Layers, LayoutDashboard, ScanSearch, Search } from 'lucide-react';
 import { api } from './api';
+import { useCaseContext } from './caseContext';
+import DesignationBadge from './components/DesignationBadge';
 
-const NAV = [
+/** Exactly five sections. Evidence, Reconstruction and Reports act on the selected case; their bare routes redirect to it. */
+export const NAV = [
   { id: 'dashboard', label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, mobile: true },
-  { id: 'new', label: 'New investigation', to: '/new', icon: FilePlus2, mobile: true },
+  { id: 'cases', label: 'Cases', to: '/cases', icon: FolderSearch, mobile: true },
+  { id: 'evidence', label: 'Evidence', to: '/evidence', icon: Layers, mobile: true },
+  { id: 'reconstruction', label: 'Reconstruction', shortLabel: 'Recon', to: '/reconstruction', icon: ScanSearch, mobile: true },
+  { id: 'reports', label: 'Reports', to: '/reports', icon: FileText, mobile: true },
 ];
+
+/** The sidebar badge and the page header read the same stored designation. Nothing is inferred here. */
+function CaseChip() {
+  const selected = useCaseContext((s) => s.selected);
+  if (!selected) {
+    return <p className="t-caption text-fg-3" data-testid="case-context">No case selected. Pick one under <Link to="/cases">Cases</Link>.</p>;
+  }
+  return (
+    <div data-testid="case-context" className="space-y-1.5">
+      <p className="t-eyebrow text-fg-3">Selected case</p>
+      <Link to={`/reconstruction/${selected.id}`} className="block rounded-lg border border-line bg-surface-2/60 p-2.5 hover:no-underline">
+        <span className="t-small block truncate font-medium text-fg">{selected.title || selected.id}</span>
+        <span className="mono t-caption block text-fg-3">{selected.code || selected.id}</span>
+        {selected.designation && <span className="mt-1.5 inline-block"><DesignationBadge designation={selected.designation} /></span>}
+      </Link>
+    </div>
+  );
+}
 
 function Frame({ crumbs, wide, children, actions }) {
   const { pathname } = useLocation();
@@ -16,7 +40,7 @@ function Frame({ crumbs, wide, children, actions }) {
     <AppShell
       sidebar={<Sidebar brand={<Brand name="TraceLine" to="/" />} items={NAV} activePath={pathname}
                         actions={<Button as={Link} to="/new" size="sm" variant="primary" block icon={FilePlus2}>New investigation</Button>}
-                        footer={<p className="t-caption text-fg-3">Investigation support. No fault determination.</p>} />}
+                        footer={<div className="space-y-3"><CaseChip /><p className="t-caption text-fg-3">Investigation support. No fault determination.</p></div>} />}
       topbar={<Topbar brand={<Brand name="TraceLine" to="/" />} breadcrumbs={crumbs} onSearch={palette.open} searchPlaceholder="Jump to a case or action…" right={<>{actions}<ThemeSwitcher align="right" /></>} />}
       mobileNav={<MobileNav items={NAV} activePath={pathname} />}
       contentClassName={wide ? 'max-w-none !pt-4 lg:!pt-5 !pb-24 lg:!pb-8' : undefined}
@@ -26,17 +50,30 @@ function Frame({ crumbs, wide, children, actions }) {
   );
 }
 
-/** App frame for every page except the landing page. Loads the case list once for the command palette (real cases only). */
+/** App frame for every page except the landing page. Loads the case list once for the command palette (real cases only)
+ *  and checks that the remembered case still exists. */
 export default function Shell({ crumbs = [], wide = false, actions, children }) {
   const nav = useNavigate();
   const [cases, setCases] = useState([]);
-  useEffect(() => { api.cases().then((r) => setCases(r.items)).catch(() => setCases([])); }, []);
+  useEffect(() => {
+    api.cases().then((r) => {
+      setCases(r.items);
+      const cur = useCaseContext.getState().selected;
+      if (cur) {
+        const live = r.items.find((c) => c.id === cur.id);
+        if (!live) useCaseContext.getState().clear();
+        else useCaseContext.getState().select(live);
+      }
+    }).catch(() => setCases([]));
+  }, []);
   const commands = useMemo(() => [
     { id: 'go-dash', group: 'Navigate', label: 'Dashboard', icon: LayoutDashboard, run: () => nav('/dashboard') },
+    { id: 'go-cases', group: 'Navigate', label: 'Cases', icon: FolderSearch, run: () => nav('/cases') },
     { id: 'go-new', group: 'Navigate', label: 'New investigation', icon: FilePlus2, run: () => nav('/new') },
     ...cases.flatMap((c) => [
-      { id: `open-${c.id}`, group: 'Cases', label: `Open ${c.title}`, icon: FolderSearch, keywords: [c.code, c.designation], run: () => nav(`/cases/${c.id}`) },
-      { id: `rep-${c.id}`, group: 'Reports', label: `Report: ${c.title}`, icon: Search, keywords: [c.code], run: () => nav(`/cases/${c.id}/report`) },
+      { id: `open-${c.id}`, group: 'Cases', label: `Open ${c.title}`, icon: ScanSearch, keywords: [c.code, c.designation], run: () => nav(`/reconstruction/${c.id}`) },
+      { id: `ev-${c.id}`, group: 'Evidence', label: `Evidence: ${c.title}`, icon: Layers, keywords: [c.code], run: () => nav(`/evidence/${c.id}`) },
+      { id: `rep-${c.id}`, group: 'Reports', label: `Report: ${c.title}`, icon: Search, keywords: [c.code], run: () => nav(`/reports/${c.id}`) },
     ]),
   ], [cases, nav]);
   return (
