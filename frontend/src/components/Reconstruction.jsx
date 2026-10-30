@@ -286,43 +286,43 @@ export function Overlaps({ overlaps = [], nameOf, onSeek }) {
   );
 }
 
-const WINDOW_MS = 1500;
-const pickSpread = (items, n = 3) => (items.length <= n ? items : Array.from({ length: n }, (_, i) => items[Math.round((i * (items.length - 1)) / (n - 1))]));
+const OMIT = { not_a_video_event: 'This event is not from a video, so it has no frames.', no_source: 'This event has no source file.', no_source_time: 'This event has no video source time.' };
 
-/** Real extracted frames before, during and after one event, in the source's own media time. Empty windows say so. */
-export function PhaseInspector({ event }) {
-  const [phases, setPhases] = useState(null);
-  const range = event?.observations?.source_time_ms;
-  const evidenceId = event?.source_id;
-  const eventId = event?.id;
-  useEffect(() => {
-    setPhases(null);
-    if (!evidenceId || !Array.isArray(range)) return undefined;
-    let off = false;
-    const [s, e] = [range[0], range[1] ?? range[0]];
-    const win = { before: [Math.max(0, s - WINDOW_MS), s - 1], during: [s, e], after: [e + 1, e + WINDOW_MS] };
-    Promise.all(Object.entries(win).map(async ([k, [a, b]]) => {
-      if (b < a) return [k, []];
-      const r = await api.frames(evidenceId, a, b).catch(() => ({ items: [] }));
-      return [k, pickSpread((r.items || []).filter((f) => f.thumbnail_url || f.full_url))];
-    })).then((pairs) => { if (!off) setPhases(Object.fromEntries(pairs)); });
-    return () => { off = true; };
-  }, [eventId, evidenceId, range?.[0], range?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+/** Stored frames before, during and after one event, from GET /storyboard. `before` and `after` are the nearest stored samples on the same file
+ *  outside the event's interval; `during` is the cited or in-interval samples. A missing frame is an empty slot. Cameras are never mixed. */
+export function PhaseInspector({ event, board }) {
   if (!event) return <p className="t-small text-fg-3">Select an event on the timeline to see the frames around it.</p>;
-  if (!evidenceId || !Array.isArray(range)) return <p className="t-small text-fg-3">Unavailable: this event has no video source time, so no frame window can be shown.</p>;
+  if (board === undefined) return <p className="t-caption text-fg-3">Loading the storyboard…</p>;
+  if (board === null) return <p className="t-small text-fg-3">Unavailable: the storyboard could not be read for this reconstruction.</p>;
+  const card = board.strips.flatMap((s) => s.items).find((i) => i.event_id === event.id);
+  if (!card) {
+    const why = board.omitted.find((o) => o.event_id === event.id)?.reason;
+    return <p className="t-small text-fg-3">Unavailable: {OMIT[why] || 'the backend has no stored frame window for this event.'}</p>;
+  }
+  const slot = (k, refs) => (
+    <section key={k} aria-label={k}>
+      <h4 className="t-eyebrow mb-1 capitalize text-fg-3">{k}</h4>
+      {refs.length === 0 ? <p className="t-caption text-fg-3">No stored frame {k === 'during' ? 'inside this event' : `${k} this event on this file`}.</p> : (
+        <ul className="flex gap-2 overflow-x-auto">
+          {refs.map((f) => (
+            <li key={f.frame_id}>
+              {f.thumbnail_url || f.full_url
+                ? <img src={f.thumbnail_url || f.full_url} alt={`${k} frame ${f.frame_no} at ${f.time_ms} ms`} loading="lazy" className="h-20 w-auto rounded border border-line" />
+                : <span className="t-caption block h-20 w-28 rounded border border-dashed border-line p-2 text-fg-3">Thumbnail not stored</span>}
+              <span className="mono t-caption block text-fg-3">{formatTime(f.time_ms)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
   return (
     <div aria-label="Before, during and after" className="space-y-3">
-      <p className="t-caption text-fg-3">Frames extracted from the stored video within {WINDOW_MS / 1000} s of the event, in the video's own time. Nothing is generated.</p>
-      {['before', 'during', 'after'].map((k) => (
-        <section key={k} aria-label={k}>
-          <h4 className="t-eyebrow mb-1 capitalize text-fg-3">{k}</h4>
-          {!phases ? <p className="t-caption text-fg-3">Loading…</p> : phases[k].length === 0 ? <p className="t-caption text-fg-3">No extracted frame in this window.</p> : (
-            <ul className="flex gap-2 overflow-x-auto">
-              {phases[k].map((f) => <li key={f.id}><img src={f.thumbnail_url || f.full_url} alt={`${k} frame ${f.frame_no} at ${f.time_ms} ms`} loading="lazy" className="h-20 w-auto rounded border border-line" /><span className="mono t-caption block text-fg-3">{formatTime(f.time_ms)}</span></li>)}
-            </ul>
-          )}
-        </section>
-      ))}
+      <p className="t-caption text-fg-3">Stored frames on one file, in that video's own time ({formatTime(card.source_time_ms[0])} to {formatTime(card.source_time_ms[1])}). {card.during_basis === 'cited_frames' ? 'During = the frames this event cites.' : 'During = stored samples inside the event interval.'} {board.note}</p>
+      {slot('before', card.before ? [card.before] : [])}
+      {slot('during', card.during)}
+      {slot('after', card.after ? [card.after] : [])}
+      {card.missing.length > 0 && <p className="t-caption text-fg-3">Not available: {card.missing.join(', ')}.</p>}
     </div>
   );
 }

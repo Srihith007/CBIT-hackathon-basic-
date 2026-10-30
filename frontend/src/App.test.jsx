@@ -231,8 +231,8 @@ describe('real and synthetic banners', () => {
 describe('reports page', () => {
   const rep = (over) => ({ id: 'rpt_1', case_id: 'case_r', version: 1, created_at: '2026-10-30T11:00:00Z', has_pdf: true, validation: { passed: true, checks: [{ check: 'no language assigning fault', passed: true }] }, ...over });
   it('previews an executive and a technical report from their stored format and offers a PDF only where one exists', async () => {
-    api.reports.mockResolvedValue({ items: [rep({ id: 'rpt_2', version: 2, has_pdf: false, validation: { passed: false, checks: [{ check: 'sixteen sections in order', passed: false }] } }), rep()] });
-    api.reportById.mockImplementation(async (id) => ({ id, content: { format: id === 'rpt_1' ? 'investigator' : 'full' } }));
+    api.reports.mockResolvedValue({ items: [rep({ id: 'rpt_2', version: 2, format: 'full', has_pdf: false, validation: { passed: false, checks: [{ check: 'sixteen sections in order', passed: false }] } }), rep({ format: 'executive' })] });
+    api.reportById.mockClear();
     api.reportMd.mockImplementation(async (id) => `# markdown for ${id}`);
     app('/reports/case_r');
     expect(await screen.findByText('# markdown for rpt_1')).toBeInTheDocument();
@@ -242,6 +242,7 @@ describe('reports page', () => {
     expect(screen.getByText('PDF unavailable')).toBeInTheDocument();
     expect(screen.getByText('Failed validation')).toBeInTheDocument();
     expect(screen.getByText('Version 2')).toBeInTheDocument();
+    expect(api.reportById).not.toHaveBeenCalled(); // the list's `format` is enough
   });
   it('generates the investigator format for executive and the full export for technical', async () => {
     api.report.mockResolvedValue({ id: 'rpt_9' });

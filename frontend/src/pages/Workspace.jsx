@@ -23,14 +23,14 @@ import { FindingDetail, FindingRow } from '../components/FindingParts';
 import { FrameDrawer, SensorDrawer, StatementDrawer } from '../components/EvidenceDrawers';
 import { IncidentCards, IncidentGallery, IncidentOverview, IncidentVehicles } from '../components/IncidentAnalysis';
 import CaseBanner from '../components/CaseBanner';
-import LocalCaseMeta from '../components/LocalCaseMeta';
+import CaseMeta from '../components/CaseMeta';
 import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
 /** The navigation rail starts collapsed on screens narrower than 1600 px so the video stays the main element; the choice is remembered. */
 const readNav = () => { try { const v = localStorage.getItem(NAV_KEY); if (v) return v === 'open'; } catch { /* storage unavailable */ } return window.innerWidth >= 1600; };
 
-function EventTab({ event, nameOf }) {
+function EventTab({ event, nameOf, board }) {
   if (!event) return <p className="t-small text-fg-3">Select an event on the timeline to inspect it.</p>;
   return (
     <div className="space-y-3">
@@ -40,7 +40,7 @@ function EventTab({ event, nameOf }) {
         <EventTrace event={event} nameOf={nameOf} />
       </div>
       <EventClocks event={event} />
-      <PhaseInspector event={event} />
+      <PhaseInspector event={event} board={board} />
     </div>
   );
 }
@@ -57,6 +57,7 @@ export default function Workspace() {
   const [incident, setIncident] = useState(null);
   const [narrative, setNarrative] = useState(null);
   const [frames, setFrames] = useState([]);
+  const [board, setBoard] = useState(undefined);
   const [camera, setCamera] = useState('all');
   const [assoc, setAssoc] = useState(undefined);
   const [complete, setComplete] = useState(undefined);
@@ -175,6 +176,13 @@ export default function Workspace() {
   }, [caseId, scenarioId]);
   const seekTo = useCallback((ms) => { const st = useWorkspace.getState(); st.setPlaying(false); st.requestSeek(ms); }, []);
   useEffect(() => {
+    setBoard(undefined);
+    if (!scenarioId) return undefined;
+    let off = false;
+    api.storyboard(caseId, scenarioId).then((b) => { if (!off) setBoard(b); }).catch(() => { if (!off) setBoard(null); });
+    return () => { off = true; };
+  }, [caseId, scenarioId]);
+  useEffect(() => {
     const chosen = incident?.items?.find((item) => item.id === activeId) || incident?.unplaced?.find((item) => item.id === activeId) || incident?.items?.[0];
     if (!scenarioId || !chosen) { setFrames([]); return undefined; }
     let cancel = false;
@@ -250,7 +258,7 @@ export default function Workspace() {
         )}
       </div>
       <CaseBanner designation={c.designation} warning={eff.warning} />
-      <div className="mb-3"><LocalCaseMeta caseId={c.id} /></div>
+      <div className="mb-3"><CaseMeta c={c} /></div>
 
       {data.none ? (
         <ErrorState title="No reconstruction yet" description="The pipeline has not produced a reconstruction for this case. Open the dashboard to check processing jobs." />
@@ -281,7 +289,7 @@ export default function Workspace() {
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
                 {tab === 'overview' && <Overview model={model} designation={eff.value} activeId={activeId} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
-                {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} />}
+                {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} board={board} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />
                   : model.findings.length === 0 ? <p className="t-small text-fg-3">No findings were produced for this reconstruction.</p>

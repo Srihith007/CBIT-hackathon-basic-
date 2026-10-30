@@ -9,7 +9,7 @@ vi.mock('../api', () => ({
   api: {
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
-    seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), summary: vi.fn(),
+    seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), storyboard: vi.fn(), summary: vi.fn(),
     jobs: vi.fn(), modelRuns: vi.fn(), review: vi.fn(), associations: vi.fn(), completeness: vi.fn(), frames: vi.fn(), tracks: vi.fn(), addAssociation: vi.fn(),
     overlays: vi.fn().mockResolvedValue({ items: [] }), streamUrl: (id) => `/api/v1/evidence/${id}/stream`,
   },
@@ -43,6 +43,7 @@ function setup({ hypotheses, designation = 'real', evidence = [video('ev_n', 'No
   api.incidentEvents.mockResolvedValue({ scenario_id: 'scn_1', contact_status: 'insufficient_evidence', provenance: 'real-detector', items, unplaced: [] });
   api.incidentNarrative.mockResolvedValue({ contact_status: 'insufficient_evidence', deterministic: { headline: 'No collision or near miss was identified in the analysed evidence.', sentences: [] }, ai_narrative_status: 'unavailable', ai_narrative: null, hypothesis_explanation: explanation || { items: [], note: 'Stored rule alternatives with evidence ids. No probability is assigned.' } });
   api.incidentFrames.mockResolvedValue({ items: [] });
+  api.storyboard.mockResolvedValue(board);
   if (assoc instanceof Error) api.associations.mockRejectedValue(assoc); else api.associations.mockResolvedValue(assoc);
   if (completeness instanceof Error) api.completeness.mockRejectedValue(completeness); else api.completeness.mockResolvedValue(completeness);
   api.frames.mockResolvedValue({ items: [] });
@@ -53,7 +54,8 @@ function setup({ hypotheses, designation = 'real', evidence = [video('ev_n', 'No
   );
 }
 
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); useWorkspace.getState().reset('case_1', 'scn_1'); });
+let board = { scenario_id: 'scn_1', ordering: 'per_source_media_time', note: 'Cameras are not interleaved.', strips: [], omitted: [] };
+beforeEach(() => { board = { scenario_id: 'scn_1', ordering: 'per_source_media_time', note: 'Cameras are not interleaved.', strips: [], omitted: [] }; vi.clearAllMocks(); localStorage.clear(); useWorkspace.getState().reset('case_1', 'scn_1'); });
 
 describe('reconstruction workspace order', () => {
   it('lists video, summary, vehicles, key observations, keyframes, timeline, contradictions and gaps, scenarios, then technical details', async () => {
@@ -166,17 +168,33 @@ describe('cross-camera association, gaps and sensors', () => {
 });
 
 describe('before, during and after inspector', () => {
-  it('shows real extracted frames around the selected event and says so for an empty window', async () => {
-    api.frames.mockImplementation(async (_id, from) => (from === 0 ? { items: [{ id: 1, frame_no: 3, time_ms: 500, thumbnail_url: '/f/1.jpg' }] } : { items: [] }));
+  it('shows the stored storyboard frames for the selected event and an honest empty slot for what is missing', async () => {
+    board = { ...board, strips: [{ evidence_id: 'ev_n', items: [{ event_id: 'evt_a', event_type: 'vehicle_slowing', title: 'North vehicle slows', evidence_id: 'ev_n', source_time_ms: [1000, 1200], during_basis: 'samples_inside_interval',
+      before: { evidence_id: 'ev_n', frame_id: 1, frame_no: 3, time_ms: 800, thumbnail_url: '/f/1.jpg', full_url: '/f/1f.jpg' }, during: [], after: null, missing: ['during', 'after'] }] }] };
     setup();
     await screen.findByText('No collision or near miss was identified in the analysed evidence.');
-    api.frames.mockImplementation(async (_id, from) => (from < 1000 ? { items: [{ id: 1, frame_no: 3, time_ms: 500, thumbnail_url: '/f/1.jpg' }] } : { items: [] }));
     fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
     fireEvent.click(screen.getByRole('tab', { name: 'Event' }));
     const box = await screen.findByLabelText('Before, during and after');
-    await waitFor(() => expect(within(box).getByAltText('before frame 3 at 500 ms')).toBeInTheDocument());
-    expect(within(within(box).getByLabelText('during')).getByText('No extracted frame in this window.')).toBeInTheDocument();
-    expect(api.frames).toHaveBeenCalledWith('ev_n', 0, 999);
+    await waitFor(() => expect(within(box).getByAltText('before frame 3 at 800 ms')).toBeInTheDocument());
+    expect(within(within(box).getByLabelText('during')).getByText('No stored frame inside this event.')).toBeInTheDocument();
+    expect(within(within(box).getByLabelText('after')).getByText('No stored frame after this event on this file.')).toBeInTheDocument();
+    expect(box).toHaveTextContent('Not available: during, after.');
+    expect(api.storyboard).toHaveBeenCalledWith('case_1', 'scn_1');
+    expect(api.frames).not.toHaveBeenCalled();
+  });
+  it('says Unavailable, with the backend reason, for an event the storyboard omitted', async () => {
+    board = { ...board, omitted: [{ event_id: 'evt_a', reason: 'no_source_time' }] };
+    setup();
+    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: 'Event' }));
+    expect(await screen.findByText(/Unavailable: This event has no video source time/)).toBeInTheDocument();
+  });
+  it('says the storyboard is unavailable when the request fails, and shows no frame', async () => {
+    setup();
+    api.storyboard.mockRejectedValue(new Error('boom'));
+    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
   });
   it('shows the clocks and trace the backend stored, and Not established for a null clock', async () => {
     setup({ clocks: { media_ms: [1000, 1200], container_pts_ms: null, wall_clock: null, case_ms: [1000, 1200], synchronized_ms: null }, trace: { source_id: 'ev_n', source_event_id: 'se_1', evidence_ids: ['ev_n'], complete: true } });

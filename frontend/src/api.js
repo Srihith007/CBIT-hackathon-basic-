@@ -34,6 +34,7 @@ export const api = {
   timeline: (id, scenario) => req(`/cases/${id}/timeline${q({ scenario_id: scenario })}`),
   incidentEvents: (id, scenario) => req(`/cases/${id}/incident-events${q({ scenario_id: scenario })}`),
   incidentNarrative: (id, scenario) => req(`/cases/${id}/incident-narrative${q({ scenario_id: scenario })}`),
+  storyboard: (id, scenario) => req(`/cases/${id}/storyboard${q({ scenario_id: scenario })}`),
   incidentFrames: (id, scenario, eventId) => req(`/cases/${id}/incident-frames${q({ scenario_id: scenario, event_id: eventId })}`),
   associations: (id, scenario) => req(`/cases/${id}/associations${q({ scenario_id: scenario })}`),
   addAssociation: (id, body) => req(`/cases/${id}/associations`, { method: 'POST', body: JSON.stringify(body) }),

@@ -1,6 +1,6 @@
 # Final frontend V2 audit
 
-Branch `feat/traceline-investigation-flow-v2-frontend`, based on `feat/traceline-investigation-flow-v2` at `60c474f`, merged with backend `de0e5ae` (source metadata, contract §14). Files changed are under `frontend/` and `docs/` only. `backend/` was not edited by this branch; the only backend files present are the ones merged in from the backend branch.
+Branch `feat/traceline-investigation-flow-v2-frontend`, merged with backend `8e5cedc` (migration `0010`: case incident fields, report list `format`, storyboard) and with the final-audit UI fixes (`92e03a7`). Files changed are under `frontend/` and `docs/` only. `backend/` was not edited by this branch; the only backend files present are the ones merged in from the backend branch.
 
 ## What was built
 
@@ -19,53 +19,56 @@ Branch `feat/traceline-investigation-flow-v2-frontend`, based on `feat/traceline
 | Value | Stored |
 |---|---|
 | Title, description, reference (as `code`), designation | Backend, `POST /cases`, `PATCH /cases/{id}` |
-| Camera name, camera type, location text, recording start and end, timezone | Backend, `PATCH /evidence/{id}/source` |
-| Start time with timezone, clock offset, stated uncertainty | Backend, `PUT /evidence/{id}/clock`, basis `declared_by_investigator`. The UI refuses a start time without a stated uncertainty and sends a clock only when one of those fields was changed. |
+| **Incident date and time** | Backend `incident_at`. The form sends it only with a **time zone offset the investigator chooses** (starts at the browser's offset, shown); without one the backend would answer 422 `INCIDENT_TIMEZONE_REQUIRED`, so the UI never sends a bare time. The stored value is shown with its own offset, never converted. |
+| **Incident location** | Backend `location_text`, free text, no map. `incident_at_note` from the backend is shown as the tooltip. |
+| Camera name/type, location text, recording start/end, timezone | Backend, `PATCH /evidence/{id}/source` |
+| Start time with timezone, clock offset, stated uncertainty | Backend, `PUT /evidence/{id}/clock` (`declared_by_investigator`) |
 | Offset to another source | Backend, `PATCH /evidence/{id}/source` |
-| Incident date and time, incident location | This browser only, labelled "entered by you, saved in this browser only". No backend field exists. |
+
+The earlier "kept only in this browser" storage and notice were removed (`LocalCaseMeta`, `lib/caseMeta`).
+
+## Backend fields now wired
+- Reports list reads `format` (`executive` | `full`); no report detail is fetched to find the type (a test asserts `reportById` is not called).
+- `GET /cases/{id}/storyboard` feeds the Event tab's before / during / after. `before` and `after` are the backend's nearest stored samples on the same file, `during` the cited or in-interval samples. A missing frame is an empty slot ("No stored frame before this event on this file"), omitted events say why (`no_source_time`, ...), and the strips are never interleaved across cameras. The old client-side 1.5 s window was removed.
+- Case create, edit (Cases page) and the workspace header use `incident_at` / `location_text`.
+- Verified rendering from the live API (two-camera and one-video real cases): associations (none stored, shown as not established, no probability), completeness (one video: stored reasons and gaps; two unsynchronized cameras: "Insufficient evidence", `no_placed_evidence`, `sources_unsynchronized`), `evidence_class`, event `clocks` (wall clock `null` -> Not established), `trace`, `overlaps` (none: "No two placed sources overlap"), `hypotheses` (none: "Insufficient evidence to propose one"), and the narrative `hypothesis_explanation` note. No "Not available from this backend build yet" state remains for anything the backend serves.
 
 ## Honest states
 
-Missing data is shown as Not established, Unavailable, Insufficient evidence or "Not available from this backend build yet". Nothing computes a likelihood: hypotheses and associations carry no percentage, and the tests assert that no `%` appears in the hypotheses block. Associations are always labelled Uncertain. The UI never matches track numbers across cameras. Synthetic text is rendered only for cases whose designation or evidence is synthetic or mixed, and a real case never uploads with `synthetic=true`. There is no separate multi-angle page and no evidence-detail workflow page.
+Missing data is shown as Not established, Unavailable or Insufficient evidence. Nothing computes a likelihood; hypotheses are labelled as hypotheses with their alternatives and no percentage (asserted in tests). Synthetic data never appears inside a real case: a real case containing a synthetic file shows MIXED with a warning naming the file.
 
-## Tests
+## Tests (final)
 
-`npx vitest run`: 8 files, 107 tests, 107 passed, 0 failed. `npx vite build`: succeeded.
+| Suite | Result |
+|---|---|
+| Frontend `npx vitest run` | **9 files, 133 tests, 133 passed, 0 failed** |
+| Frontend `npx vite build` | succeeded |
+| Backend `pytest` from `backend/` (read only, local checkout with scenario packages) | **267 passed, 3 skipped, 0 failed**. Cursor's run reported 251 passed / 19 skipped because the scenario packages and some fixtures were absent there. |
+| API integration audit `node frontend/audit/api-audit.mjs` against the live API | 387 checks, 386 passed, **1 failed**: `TL-E2B0F7` (a deliberate scratch case: a `real` case with a synthetic upload). The failure is the backend gap in `FRONTEND_V2_BACKEND_NEEDS.md` #1, not a frontend fault. |
 
-| File | Tests | Covers |
-|---|---|---|
-| `src/App.test.jsx` | 23 | shell navigation (five links), case persistence across sections, pick-a-case, legacy redirects, stale case cleared, Cases search, filter, sort, empty, edit, Evidence metadata and sync status, stored source details, offset to another source, banners (real, synthetic, mixed), Reports executive and technical preview, PDF availability, generate |
-| `src/pages/NewCase.test.jsx` | 15 | create payload, browser-only fields, upload source metadata (every field, Other kind), clock body, no default uncertainty, end before start, rejected upload, duplicate upload, real never synthetic, processing shows only real stages |
-| `src/pages/Workspace.test.jsx` | 17 | section order, camera filter, timeline card seeks the single clock, hypotheses labelled with alternatives and no probability, not-available and empty states, completeness, association states, recording gaps, sensor Unavailable, before/during/after frames, synthetic and real banner |
-| `src/components/IncidentAnalysis.test.jsx` | 5 | existing: card seeks the player, closed technical details, no Trajectories panel by default |
-| `src/components/components.test.jsx`, `src/lib/*.test.js`, `src/pages/Dashboard.test.jsx` | 47 | existing |
+Tests added or changed this round: incident time with offset (`lib.test.js`, `NewCase.test.jsx`: sent with the chosen offset, omitted when empty, no local storage), report list `format` without detail reads (`App.test.jsx`), storyboard frames, empty slots, omitted events and failure (`Workspace.test.jsx`).
 
 ## Screenshots
 
-Captured with headless Chrome 156 against the Vite dev server and the live API, in `docs/frontend-v2/screenshots/`, each at `-1366x768`, `-1440x900` and `-1920x1080`:
+Headless Chrome 156 against the Vite dev server and the live V2 API, `docs/frontend-v2/screenshots/`, each at `-1366x768`, `-1440x900`, `-1920x1080`:
 
 | Prefix | Page |
 |---|---|
-| `landing` | Landing |
-| `dashboard`, `cases` | Dashboard, Cases |
-| `evidence-TL-C30DD7`, `reconstruction-TL-C30DD7`, `reports-TL-C30DD7` | Evidence, Reconstruction, Reports for the real case TL-C30DD7 |
-| `guided-details` | Guided flow, first step (details) |
-| `evidence-two-camera`, `reconstruction-two-camera` | Real case TL-395130, two cameras with no clock relation |
-| `reconstruction-TL-C30DD7-full-1440x2800` | Whole reconstruction page, to show section order |
+| `dashboard`, `cases`, `guided-flow-new` | Dashboard, Cases, guided flow step 1 |
+| `one-video-evidence`, `one-video-reconstruction`, `one-video-reports` | One real video, incomplete evidence (an equivalent of TL-C30DD7 built here: the same ACCIDENT clip, case `TL-ECE21F`, with incident time and location set) |
+| `two-camera-evidence`, `two-camera-reconstruction` | Two real cameras with no clock relation (an equivalent of TL-395130 built here, case `TL-3D7B3E`) |
+| older prefixes (`evidence-TL-C30DD7`, `reconstruction-TL-C30DD7`, `reports-TL-C30DD7`, `evidence-two-camera`, `reconstruction-two-camera`, `landing`, `guided-details`) | Earlier captures kept as they were |
 
-## What could not be captured or run
+`TL-C30DD7` and `TL-395130` exist only in the other developer's local database; they are not in this one, so the new shots use equivalent cases created here (the same published clips). The cases are labelled "V2 audit" in the dashboard.
 
-- **Complete-evidence case.** No real case has a synchronized second camera, a sensor file and a witness statement. TL-C30DD7 is the incomplete-evidence case: one video, no sensor, no witness. The two-camera case shows the unsynchronized state. No complete real case was fabricated.
-- **Guided flow after the first step.** The upload step and the processing screen were not captured. Reaching them creates a case, and cases cannot be deleted. Their behaviour is covered by the 15 tests in `NewCase.test.jsx`, not by screenshots.
-- **Live upload with source metadata.** The upload-then-PATCH-then-clock sequence ran against mocked API calls only. It was not run in a browser against the live API.
-- **Firefox and Safari.** Not installed, not run. Only Chrome was used.
-- **Features that depend on the backend, shown as not available.** The contract (§14) describes `associations`, `completeness`, timeline `hypotheses` and `overlaps`, and event `clocks`, `evidence_class` and `trace`. The backend at `de0e5ae` does not serve them yet (404 or absent key, checked live). The UI is written to the documented shapes. Component tests feed those shapes, so rendering of real data is tested, but not against a live response. See `docs/FRONTEND_V2_BACKEND_NEEDS.md`.
-- **Not built.** An action to create an association (`POST /cases/{id}/associations`), a storyboard view, sensor column mapping, and rendering of `overlaps`.
-- **Local API.** The dev API had to be restarted on the merged code and migration `0008` applied to the dev database for the source endpoint.
+## Browsers actually run
+Google Chrome 156 (headless for screenshots) and the in-app Chromium browser pane (interactive checks). **Firefox and Safari were not run** and are not claimed.
 
-## Known limits
-
-- Incident date, time and location are not persisted by the backend.
-- Report format is read from each report's detail because the list does not carry it.
-- A declared clock is trusted by the backend for synchronization. The UI warns about this and requires a stated uncertainty, but it cannot verify the declared time.
-- A source offset set on the Evidence page applies to a reconstruction only after the next scenario build.
+## Limitations
+- No complete-evidence case exists (a synced second camera plus a sensor file plus a witness statement). The screenshots show incomplete evidence and unsynchronized cameras; none is faked.
+- Featherless: the UI shows the stored narrative status; no live model call was made.
+- `visually_supported_contact` is never emitted by the current video rules, so a possible collision is amber only.
+- The V2 scenario tests use synthetic fixtures; only the selected-clip test used real footage. On the real clip the rules still flag many candidates; the UI groups them and says none is confirmed.
+- The one-video case's `completeness.defensible` is `true` (backend flag, shown as stored) despite missing calibration, unconfirmed identities and fragmented tracks; see `FRONTEND_V2_BACKEND_NEEDS.md` #2.
+- Rotated video, touch scrubbing and the live upload-then-clock sequence in a browser were not tested. The browser pane was also being driven by another session during checks; a separate tab was used.
+- A source offset applies only to the next scenario build.

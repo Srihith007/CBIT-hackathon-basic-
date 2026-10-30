@@ -9,7 +9,7 @@ import CaseBanner from '../components/CaseBanner';
 import EvidenceUploader from '../components/EvidenceUploader';
 import JobStages from '../components/JobStages';
 import { ACTIVE, STAGE_LABEL } from '../lib/jobs';
-import { saveCaseMeta } from '../lib/caseMeta';
+import { OFFSETS, browserOffset, toIncidentAt } from '../lib/incident';
 
 const STEPS = ['Investigation', 'Evidence', 'Processing'];
 const REF = /^[A-Za-z0-9_-]{3,40}$/;
@@ -26,9 +26,9 @@ function Stepper({ step }) {
   );
 }
 
-/** Step 1. Creates the case. Incident date/time and location are not stored by the backend yet and are kept in this browser. */
+/** Step 1. Creates the case. Incident time (with the time zone offset you choose) and location are stored by the backend. */
 function Details({ initial, onCreated }) {
-  const [f, setF] = useState({ title: initial.title, designation: initial.designation, incident_at: '', location: '', description: '', reference: '' });
+  const [f, setF] = useState({ title: initial.title, designation: initial.designation, incident_at: '', offset: browserOffset(), location: '', description: '', reference: '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const refErr = f.reference && !REF.test(f.reference) ? 'Use 3 to 40 letters, digits, dash or underscore.' : undefined;
@@ -38,8 +38,9 @@ function Details({ initial, onCreated }) {
       const body = { title: f.title.trim(), designation: f.designation };
       if (f.description.trim()) body.description = f.description.trim();
       if (f.reference) body.code = f.reference;
+      if (f.incident_at) body.incident_at = toIncidentAt(f.incident_at, f.offset);
+      if (f.location.trim()) body.location_text = f.location.trim();
       const c = await api.createCase(body);
-      if (f.incident_at || f.location) saveCaseMeta(c.id, { incident_at: f.incident_at, location: f.location });
       onCreated(c);
     } catch (x) { setErr(x.message); setBusy(false); }
   };
@@ -51,8 +52,11 @@ function Details({ initial, onCreated }) {
                 options={[{ value: 'real', label: 'Real incident footage' }, { value: 'staged', label: 'Staged / recreated' }, { value: 'synthetic', label: 'Synthetic / generated' }]} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Incident date and time" optional hint="Kept in this browser only; the backend has no field for it yet."><Input type="datetime-local" value={f.incident_at} onChange={(e) => setF({ ...f, incident_at: e.target.value })} disabled={busy} /></Field>
-        <Field label="Location" optional hint="Free text. Kept in this browser only. No map is drawn."><Input value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} disabled={busy} /></Field>
+        <div className="space-y-2">
+          <Field label="Incident date and time" optional hint="The time you state. It is not read from any file and is not used to pick frames."><Input type="datetime-local" value={f.incident_at} onChange={(e) => setF({ ...f, incident_at: e.target.value, offset: f.incident_at ? f.offset : browserOffset(e.target.value) })} disabled={busy} /></Field>
+          <Field label="Time zone offset" hint="Required with a time. Starts at this browser's offset; change it if the incident was elsewhere."><Select value={f.offset} onChange={(e) => setF({ ...f, offset: e.target.value })} disabled={busy || !f.incident_at} options={OFFSETS.map((o) => ({ value: o, label: `UTC${o}` }))} /></Field>
+        </div>
+        <Field label="Location" optional hint="Free text. No map is drawn and no coordinates are looked up."><Input value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} disabled={busy} /></Field>
       </div>
       <Field label="Description" optional><Textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} disabled={busy} /></Field>
       <Field label="Reference" optional error={refErr} hint="Used as the case code if given, for example your report number."><Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} disabled={busy} /></Field>

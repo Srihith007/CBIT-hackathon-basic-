@@ -34,14 +34,22 @@ describe('guided flow: create investigation', () => {
     expect(api.createCase).toHaveBeenCalledWith({ title: 'Junction', designation: 'real', description: 'North approach', code: 'REF-2026-14' });
     expect(useCaseContext.getState().selected).toMatchObject({ id: 'c1', designation: 'real' });
   });
-  it('keeps incident time and location in this browser and says so, because the backend has no field for them', async () => {
+  it('sends incident time with the chosen offset and the location to the backend, and no longer says they are browser-only', async () => {
     wrap('/new?title=Junction&designation=real');
     fireEvent.change(screen.getByLabelText(/^Incident date and time/), { target: { value: '2026-10-30T10:32' } });
+    fireEvent.change(screen.getByLabelText(/^Time zone offset/), { target: { value: '+05:30' } });
     fireEvent.change(screen.getByLabelText(/^Location/), { target: { value: 'Main St' } });
-    expect(screen.getAllByText(/Kept in this browser only/).length).toBe(2);
+    expect(screen.queryByText(/Kept in this browser only/)).toBeNull();
     await create();
-    expect(api.createCase.mock.calls[0][0]).not.toHaveProperty('location');
-    expect(JSON.parse(localStorage.getItem('traceline.caseMeta.c1'))).toEqual({ incident_at: '2026-10-30T10:32', location: 'Main St' });
+    expect(api.createCase).toHaveBeenCalledWith({ title: 'Junction', designation: 'real', incident_at: '2026-10-30T10:32:00+05:30', location_text: 'Main St' });
+    expect(localStorage.getItem('traceline.caseMeta.c1')).toBeNull();
+  });
+  it('omits incident time and location when they are left empty', async () => {
+    wrap('/new?title=Junction&designation=real');
+    await create();
+    const body = api.createCase.mock.calls[0][0];
+    expect(body).not.toHaveProperty('incident_at');
+    expect(body).not.toHaveProperty('location_text');
   });
   it('refuses a reference the backend would reject', () => {
     wrap('/new?title=Junction&designation=real');

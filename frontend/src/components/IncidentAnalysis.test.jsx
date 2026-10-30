@@ -11,7 +11,7 @@ vi.mock('../api', () => ({
   api: {
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
-    seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), summary: vi.fn(),
+    seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), storyboard: vi.fn().mockResolvedValue({ scenario_id: 's', ordering: 'x', note: '', strips: [], omitted: [] }), summary: vi.fn(),
     jobs: vi.fn(), modelRuns: vi.fn(), review: vi.fn(), associations: vi.fn(), completeness: vi.fn(), frames: vi.fn(),
     overlays: vi.fn(), streamUrl: (id) => `/api/v1/evidence/${id}/stream`,
   },

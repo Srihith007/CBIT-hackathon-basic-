@@ -7,6 +7,7 @@ import DesignationBadge from '../components/DesignationBadge';
 import { api } from '../api';
 import { useCaseContext } from '../caseContext';
 import { SORTS, filterCases } from '../lib/cases';
+import { OFFSETS, browserOffset, splitIncidentAt, toIncidentAt } from '../lib/incident';
 
 const STATUS = ['open', 'processing', 'review', 'closed'];
 const DESIGNATION = ['real', 'staged', 'synthetic', 'mixed'];
@@ -15,7 +16,8 @@ const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'grid' 
 
 function EditCase({ c, onClose, onSaved }) {
   const toast = useToast();
-  const [f, setF] = useState({ title: c.title, description: c.description || '', status: c.status });
+  const inc = splitIncidentAt(c.incident_at);
+  const [f, setF] = useState({ title: c.title, description: c.description || '', status: c.status, incident_at: inc.local, offset: inc.offset || browserOffset(), location: c.location_text || '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const save = async (e) => {
@@ -23,6 +25,8 @@ function EditCase({ c, onClose, onSaved }) {
     try {
       const body = { title: f.title, status: f.status };
       if (f.description !== (c.description || '')) body.description = f.description;
+      if (f.incident_at !== inc.local || (f.incident_at && f.offset !== inc.offset)) body.incident_at = toIncidentAt(f.incident_at, f.offset);
+      if (f.location.trim() !== (c.location_text || '')) body.location_text = f.location.trim() || null;
       const next = await api.patchCase(c.id, body);
       toast({ title: 'Case updated', type: 'success' });
       onSaved(next);
@@ -35,7 +39,12 @@ function EditCase({ c, onClose, onSaved }) {
         <Field label="Title"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required /></Field>
         <Field label="Description" optional><Textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
         <Field label="Status"><Select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} options={STATUS.map((s) => ({ value: s, label: s }))} /></Field>
-        <p className="t-caption text-fg-3">Incident date and time, location, and an external reference are not stored by the backend yet. See docs/FRONTEND_V2_BACKEND_NEEDS.md.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Incident date and time" optional hint="Cleared by emptying the field."><Input type="datetime-local" value={f.incident_at} onChange={(e) => setF({ ...f, incident_at: e.target.value, offset: f.incident_at ? f.offset : browserOffset(e.target.value) })} /></Field>
+          <Field label="Time zone offset" hint="Required with a time."><Select value={f.offset} disabled={!f.incident_at} onChange={(e) => setF({ ...f, offset: e.target.value })} options={OFFSETS.map((o) => ({ value: o, label: `UTC${o}` }))} /></Field>
+        </div>
+        <Field label="Location" optional><Input value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></Field>
+        <p className="t-caption text-fg-3">The reference (case code) is set when the case is created and cannot be edited here.</p>
         {err && <Alert variant="danger" title="Could not save">{err}</Alert>}
       </form>
     </Modal>

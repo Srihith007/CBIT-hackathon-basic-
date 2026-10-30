@@ -14,7 +14,8 @@ export const KINDS = {
   executive: { format: 'investigator', label: 'Executive', detail: 'Investigator format: executive summary, key timeline, findings and evidence appendix.' },
   technical: { format: 'full', label: 'Technical', detail: 'Full export: sixteen sections including every stored event, methods and models.' },
 };
-export const kindOf = (report) => (report?.content?.format === 'investigator' ? 'executive' : 'technical');
+/** The list endpoint carries `format` (`executive` | `full`). No report detail is read to find it. */
+export const kindOf = (row) => (row?.format === 'executive' ? 'executive' : 'technical');
 
 export default function ReportPage() {
   const { caseId } = useParams();
@@ -30,9 +31,7 @@ export default function ReportPage() {
     try {
       const [c, list, ev, sc] = await Promise.all([api.case(caseId), api.reports(caseId), api.evidence(caseId), api.scenarios(caseId).catch(() => ({ items: [] }))]);
       select(c);
-      const recent = list.items.slice(0, 10);
-      const details = await Promise.all(recent.map((r) => api.reportById(r.id).catch(() => null)));
-      const rows = list.items.map((r) => ({ ...r, kind: kindOf(details[recent.indexOf(r)]) , known: recent.includes(r) && !!details[recent.indexOf(r)] }));
+      const rows = list.items.map((r) => ({ ...r, kind: kindOf(r), known: r.format === 'executive' || r.format === 'full' }));
       setState({ status: 'ready', c, ev: ev.items, rows, scenarios: sc.items });
     } catch (e) { setState({ status: 'error', e }); }
   }, [caseId, select]);
@@ -116,7 +115,7 @@ export default function ReportPage() {
                 <li key={r.id}>
                   <button type="button" onClick={() => { setOpenId(r.id); setKind(r.kind); }} aria-pressed={shown?.id === r.id}
                           className={`w-full rounded-lg border p-3 text-left transition hover:bg-surface-2 ${shown?.id === r.id ? 'border-accent bg-accent/5' : 'border-line'}`}>
-                    <span className="flex items-center gap-2"><span className="t-small font-medium">Version {r.version}</span>{r.known ? <Badge variant="neutral">{KINDS[r.kind].label}</Badge> : <Badge variant="neutral">type not read</Badge>}</span>
+                    <span className="flex items-center gap-2"><span className="t-small font-medium">Version {r.version}</span>{r.known ? <Badge variant="neutral">{KINDS[r.kind].label}</Badge> : <Badge variant="neutral">type not stated</Badge>}</span>
                     <span className="t-caption mt-1 block text-fg-3">{new Date(r.created_at).toLocaleString()}</span>
                     <span className="t-caption mt-1 flex gap-2"><span className={r.validation.passed ? 'text-success' : 'text-danger'}>{r.validation.passed ? 'valid' : 'failed'}</span><span className="text-fg-3">{r.has_pdf ? 'PDF available' : 'no PDF'}</span></span>
                   </button>
@@ -124,7 +123,7 @@ export default function ReportPage() {
               ))}
             </ul>
           )}
-          <p className="t-caption mt-3 text-fg-3">The report type is read from each report's stored content. The history list itself does not carry it yet. <Link to={`/reconstruction/${c.id}`}>Back to the workspace</Link></p>
+          <p className="t-caption mt-3 text-fg-3"><Link to={`/reconstruction/${c.id}`}>Back to the workspace</Link></p>
         </aside>
       </div>
     </Shell>
