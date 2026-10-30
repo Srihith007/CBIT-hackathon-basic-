@@ -114,11 +114,11 @@ Clocks that exist:
 |---|---|
 | Witness claim extraction with statement id and text span | Implemented, not verified on a live model. The job calls Featherless or refuses. Span equality is enforced. Tests use a stand-in client. |
 | Incident narrative from stored scenario records only | Implemented. `incident.narrate` runs once at scenario build. Playback reads the stored document and does not call the model. |
-| Reject a sentence with no valid evidence id, banned wording, or an unsupported contact claim | Implemented and verified by `test_incident_analysis.py`. |
-| Failure leaves the deterministic summary and `ai_narrative` null | Implemented and verified with stand-in `NotConfigured` and `PolicyBlocked` clients, and on the rebuilt case (`policy_blocked`). The user-facing line is "AI narrative is unavailable." |
+| Reject a sentence with no valid evidence id, banned wording, an unsupported contact claim, or a hypothesis citation whose evidence ids do not match | Implemented and verified by `test_incident_analysis.py` with a stand-in client. |
+| Failure leaves the deterministic summary and `ai_narrative` null | Implemented and verified with stand-in `NotConfigured` and `PolicyBlocked` clients, and on the rebuilt case (`policy_blocked`). The user-facing line is "AI narrative is unavailable." `hypothesis_explanation.items` stays the stored list, which is empty when no complete inference exists. |
 | Key only from the environment | Implemented. `FEATHERLESS_API_KEY` is read from settings. `allow_external_inference` is checked before the key. |
 | Vision model on frames | Not implemented for the narrative. The configured vision model name is unused by that step. |
-| `docs/FEATHERLESS_INTEGRATION.md` | Not implemented. Behavior is in `backend/app/llm/featherless.py`, `backend/app/services/incident.py`, and `docs/INTEGRATION_CONTRACT.md` section 7a. |
+| `docs/FEATHERLESS_INTEGRATION.md` | Written from `backend/app/llm/featherless.py`, `backend/app/services/witness.py`, `backend/app/services/jobs.py`, and `backend/app/services/incident.py`. Live Featherless calls are not part of the test suite. |
 
 ## Phase 8 — investigator workspace
 
@@ -164,4 +164,4 @@ The merged workspace is one route. There is no second multi-angle page and no ev
 
 ## What later phases still have to build
 
-Phases 2 through 10 of the V2 summary are not done. The largest gaps are the five-page shell, editable source metadata (name, location text, recording bounds, timezone), a workspace offset editor, cross-camera association as uncertain records rather than confirmed links, the V2 evidence-type names, the three missing docs (`SENSOR_DATA_FORMAT.md`, `INCOMPLETE_EVIDENCE_RECONSTRUCTION.md`, `RECONSTRUCTION_DATA_MODEL.md`, `FEATHERLESS_INTEGRATION.md`), before/during/after and storyboard, and the scenario tests once the named lists are available. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.
+The frontend shell, before/during/after, storyboard, and browser scenario checks are still open. Backend source metadata, clocks, uncertain associations, evidence-class names, and `docs/SENSOR_DATA_FORMAT.md`, `docs/INCOMPLETE_EVIDENCE_RECONSTRUCTION.md`, `docs/RECONSTRUCTION_DATA_MODEL.md`, and `docs/FEATHERLESS_INTEGRATION.md` are in this branch. Named scenario tests are recorded in phase 10 when that module lands. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.
