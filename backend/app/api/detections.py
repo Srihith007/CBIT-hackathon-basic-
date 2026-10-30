@@ -46,7 +46,7 @@ def detections(from_ms: int = Query(0, ge=0), to_ms: int | None = Query(None, ge
                min_conf: float = Query(0.25, ge=0, le=1, description="display threshold; boxes down to the storage threshold exist"),
                include_accident_cue: bool = True, model_run_id: str | None = None, include_empty: bool = False,
                ev: EvidenceFile = Depends(get_evidence), db: Session = Depends(get_db)) -> dict:
-    """Machine detections per sampled frame. Coordinates are pixels of the original frame (after rotation metadata is applied)."""
+    """Machine detections per sampled frame. Coordinates are pixels of the frame OpenCV decoded. video.rotation is reported separately and is not applied to these boxes."""
     if ev.kind not in ("dashcam", "cctv"):
         raise AppError(400, "NOT_A_VIDEO", "Detections exist only for dashcam/cctv evidence")
     if model_run_id:

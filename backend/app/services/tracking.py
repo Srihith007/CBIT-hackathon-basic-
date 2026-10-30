@@ -62,14 +62,17 @@ def make_tracker(p: dict):
     raise ValueError(f"unknown tracker {p['tracker']}")
 
 
-def associate(frames: list[Frame], tracker, images=None) -> dict[int, int]:
-    """Feed every sampled frame (empty ones too, so time advances) in order. Returns {detection_id: raw_track_id}."""
+def associate(frames: list[Frame], tracker, images=None, progress=None) -> dict[int, int]:
+    """Feed every sampled frame (empty ones too, so time advances) in order. Returns {detection_id: raw_track_id}.
+
+    `progress(done, total)` is called after each sampled frame is given to the tracker. It is not a clock."""
     import supervision as sv
 
     classes = {c: i for i, c in enumerate(TRACK_CLASSES)}
     image_iter = iter(images) if images is not None else None
     out: dict[int, int] = {}
-    for fr in frames:
+    total = len(frames)
+    for done, fr in enumerate(frames, start=1):
         img = None
         if image_iter is not None:
             idx, img = next(image_iter)
@@ -86,6 +89,8 @@ def associate(frames: list[Frame], tracker, images=None) -> dict[int, int]:
             for did, tid in zip(res.data["det_id"], res.tracker_id):
                 if tid is not None and int(tid) >= 0:
                     out[int(did)] = int(tid)
+        if progress is not None and total:
+            progress(done, total)
     return out
 
 

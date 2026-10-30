@@ -3,6 +3,7 @@
 Stages: validate (every upload) -> preprocess (valid videos: frame index, sampled thumbnails, playback copy).
 extract_interval adds thumbnails for an investigator-selected interval at a higher rate.
 """
+import contextvars
 import hashlib
 import json
 import statistics
@@ -10,7 +11,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -38,6 +39,33 @@ VIDEO_KINDS = ("dashcam", "cctv")
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# Set by the runner for the duration of one stage. Handlers report completed work units / planned work units.
+# 1.0 is written only when the stage run finishes, so an in-flight value never means "done".
+_progress_sink: contextvars.ContextVar = contextvars.ContextVar("traceline_job_progress", default=None)
+
+
+def publish_progress(fraction: float) -> None:
+    """Publish the fraction of this stage's planned work that has already finished. Not a clock."""
+    cb = _progress_sink.get()
+    if cb is None:
+        return
+    cb(min(0.99, max(0.0, float(fraction))))
+
+
+def _progress_token(factory: sessionmaker[Session], job_id: str):
+    def sink(fraction: float) -> None:
+        try:
+            with factory() as ps:
+                ps.execute(update(ProcessingJob).where(
+                    ProcessingJob.id == job_id, ProcessingJob.status.in_(("validating", "processing"))
+                ).values(progress=round(fraction, 4)))
+                ps.commit()
+        except Exception:  # noqa: BLE001 - a progress write must not fail the stage
+            return
+
+    return _progress_sink.set(sink)
 
 
 def params_hash(params: dict) -> str:
@@ -145,7 +173,9 @@ def handle_preprocess(session: Session, settings: Settings, job: ProcessingJob) 
     rel = [(t - pts[0]) * 1000 for t in pts]
     period = statistics.median([b - a for a, b in zip(rel, rel[1:])]) if len(rel) > 1 else 0.0
     idx, truncated = vid.choose_sampled(rel, params["sample_fps"], params["max_frames"])
-    dec = vid.decode_selected(path, set(idx), out / "thumbs", params["thumb_width"], rel)
+    # Planned units: every container frame, plus the playback copy. The fraction is frames grabbed / (frames + 1).
+    dec = vid.decode_selected(path, set(idx), out / "thumbs", params["thumb_width"], rel,
+                              progress=lambda done, total: publish_progress(done / (total + 1)))
 
     rows = []
     for i, t in enumerate(rel):
@@ -172,6 +202,8 @@ def handle_preprocess(session: Session, settings: Settings, job: ProcessingJob) 
 
     if vm is not None:
         vm.pts_start_ms = pts[0] * 1000
+    if dec["decoded_count"] >= len(pts):
+        publish_progress(len(pts) / (len(pts) + 1))
     try:
         pb = vid.make_playback(path, out / "playback.mp4", pts[0] * 1000, vm.rotation if vm else None)
         if vm is not None:
@@ -215,7 +247,9 @@ def handle_interval(session: Session, settings: Settings, job: ProcessingJob) ->
     session.add(run)
     session.flush()
     out = derived_dir(settings.storage_path, ev.case_id, ev.id, run.id)
-    dec = vid.decode_selected(path, wanted, out / "thumbs", settings.thumb_width, [float(f.time_ms) for f in frames])
+    indexed = len(frames) or 1
+    dec = vid.decode_selected(path, wanted, out / "thumbs", settings.thumb_width, [float(f.time_ms) for f in frames],
+                              progress=lambda done, total: publish_progress(done / indexed))
     rows = [{"evidence_id": ev.id, "frame_no": f.frame_no, "time_ms": f.time_ms, "sampled": True,
              "thumbnail_path": _rel(settings, out / "thumbs" / dec["frames"][f.frame_no]["thumb"]),
              "blur": dec["frames"][f.frame_no]["blur"], "brightness": dec["frames"][f.frame_no]["brightness"]}
@@ -245,13 +279,16 @@ def handle_detect(session: Session, settings: Settings, job: ProcessingJob) -> s
 
     result: dict = {"device": device, "frames": len(frames), "warnings": []}
     partial = False
-    for role, stage, name, keep, conf in passes:
+    n_passes = len(passes)
+    n_frames = len(frames)
+    for pass_i, (role, stage, name, keep, conf) in enumerate(passes):
         rp = {"model": name, "imgsz": p["imgsz"], "conf": conf, "frames": "sampled", "version": detection.DETECTION_VERSION}
         ph = params_hash(rp)
         prior = session.execute(select(ModelRun).where(ModelRun.case_id == ev.case_id, ModelRun.stage == stage, ModelRun.input_sha256 == ev.sha256,
                                                        ModelRun.params_hash == ph, ModelRun.status == "completed")).scalars().first()
         if prior is not None:
             result[role] = {"reused_model_run": prior.id}
+            publish_progress((pass_i + 1) / n_passes)
             continue
         try:
             model, entry = load_yolo(name, str(settings.models_path))
@@ -268,8 +305,13 @@ def handle_detect(session: Session, settings: Settings, job: ProcessingJob) -> s
         session.flush()
         stats: dict = {}
         rows, by_class = [], {}
+
+        def _inferred(done, pass_i=pass_i):
+            if n_frames:
+                publish_progress((pass_i + done / n_frames) / n_passes)
+
         for idx, boxes in detection.detect_stream(vid.iter_frames(path, set(by_no)), model, imgsz=p["imgsz"], conf=conf,
-                                                   device=device, keep=keep, stats=stats):
+                                                   device=device, keep=keep, stats=stats, progress=_inferred):
             for b in boxes:
                 by_class[b.class_name] = by_class.get(b.class_name, 0) + 1
                 rows.append({"frame_id": by_no[idx].id, "model_run_id": run.id, "class_name": b.class_name, "confidence": b.confidence,
@@ -330,7 +372,8 @@ def handle_track(session: Session, settings: Settings, job: ProcessingJob) -> st
     session.add(run)
     session.flush()
     images = vid.iter_frames(path, {f.frame_no for f in ordered}) if p["tracker"] == "botsort" else None
-    assign = tracking.associate(ordered, tracking.make_tracker(p), images)
+    assign = tracking.associate(ordered, tracking.make_tracker(p), images,
+                                progress=lambda done, total: publish_progress(done / total if total else 0.0))
     tracks, cands = tracking.build_tracks(ordered, assign, p, (vm.width, vm.height) if vm else None)
     for t in tracks:
         session.add(VehicleTrack(evidence_id=ev.id, model_run_id=run.id, track_id=t["track_id"], class_name=t["class"],
@@ -486,15 +529,19 @@ def run_pending(factory: sessionmaker[Session], settings: Settings, limit: int =
             s.commit()
         with factory() as s:
             job = s.get(ProcessingJob, job_id)
+            token = _progress_token(factory, job_id)
             try:
-                outcome = HANDLERS[stage](s, settings, job)
-                job.status, job.progress, job.error = outcome or "completed", 1.0, None
-            except Exception as exc:  # noqa: BLE001 - a failed job must be recorded, not crash the worker
-                s.rollback()
-                job = s.get(ProcessingJob, job_id)
-                job.status, job.error = "failed", {"type": type(exc).__name__, "message": str(exc)[:300]}
-            job.finished_at = _now()
-            s.commit()
+                try:
+                    outcome = HANDLERS[stage](s, settings, job)
+                    job.status, job.progress, job.error = outcome or "completed", 1.0, None
+                except Exception as exc:  # noqa: BLE001 - a failed job must be recorded, not crash the worker
+                    s.rollback()
+                    job = s.get(ProcessingJob, job_id)
+                    job.status, job.error = "failed", {"type": type(exc).__name__, "message": str(exc)[:300]}
+                job.finished_at = _now()
+                s.commit()
+            finally:
+                _progress_sink.reset(token)
         done += 1
     return done
 

@@ -71,7 +71,7 @@ HTTP statuses used: 400, 403, 404, 409, 422, 500, 503. Codes the frontend relies
 |---|---|---|---|---|
 | duration_ms | int | yes | media_ms | observed |
 | fps_nominal, fps_measured | float | yes | frames/s; measured from PTS | observed |
-| width, height | int | yes | pixels, **after** applying rotation metadata | observed |
+| width, height | int | yes | pixels of the container stream as ffprobe reports them. `rotation` is separate and is not applied to these numbers or to detection boxes | observed |
 | codec | string | yes | | observed |
 | rotation | int | yes | degrees (null = none) | observed |
 | frame_count | int | yes | | observed |
@@ -88,11 +88,21 @@ Frames: `GET /evidence/{id}/frames?from_ms&to_ms&sampled=true&limit` → `{evide
 | evidence_id | string | yes | null for case-level jobs | system |
 | stage | string | no | `validate`\|`preprocess`\|`extract_interval`\|`detect`\|`track`\|`extract_claims` | system |
 | status | string | no | **exactly** `pending`\|`validating`\|`processing`\|`completed`\|`failed`\|`partially_completed`. Active = pending, validating, processing. | system |
-| progress | float | no | 0..1; **reported by the job, not estimated by the UI** | system |
+| progress | float | no | 0..1 **within this stage**, from work already finished. See the paragraph under this table. The UI must not invent a timer. | system |
 | attempts | int | no | | system |
 | error | string | yes | set when failed | system |
 | params, result | object | yes | stage-specific; `result.warnings[]` for partial results | system |
 | created_at, started_at, finished_at | string | yes (started/finished) | ISO UTC | system |
+`progress` is the fraction of that stage's planned work that has already finished. It is not elapsed time. While the stage is `validating` or `processing`, the stored value is capped at 0.99. The runner writes 1.0 only when `status` becomes `completed` or `partially_completed`. A `failed` job keeps the last published fraction, or 0 if the stage had not reported any unit yet.
+
+| Stage | Unit |
+|---|---|
+| validate, extract_claims | no intermediate units; stays 0 until the runner writes 1.0 |
+| preprocess | container frames grabbed / (container frame count + 1). The last unit is the playback copy |
+| extract_interval | frames decoded in the requested interval / frames indexed in that interval |
+| detect | `(pass_index + frames_inferred / frames_in_pass) / pass_count`. A pass whose result is reused counts as finished. A missing accident-weight file is not counted as a pass that ran |
+| track | sampled frames handed to the tracker / sampled frames |
+
 Pipeline: upload → validate → preprocess → detect → track run automatically (chained). `POST /cases/{id}/process` body `{stages:[preprocess|detect|track], sample_fps?, max_frames?, chain_detect?}` → 202 `{jobs:[Job], skipped_note}`.
 
 ## 5. Detection — `GET /evidence/{id}/detections?from_ms&to_ms&classes&min_conf&model_run_id&include_accident_cue&include_empty`
@@ -106,7 +116,7 @@ Pipeline: upload → validate → preprocess → detect → track run automatica
 | detections[].id | int | no | | system |
 | .class | string | no | `car`\|`truck`\|`bus`\|`motorcycle`\|`bicycle`\|`pedestrian`\|`traffic_light`\|`accident_cue` | observed |
 | .confidence | float | no | 0..1, **not** a calibrated probability | observed |
-| .bbox | [x1,y1,x2,y2] float | no | pixels of the oriented frame (`frame_size`) | observed |
+| .bbox | [x1,y1,x2,y2] float | no | pixels of the OpenCV-decoded frame (`frame_size`). `video.rotation` is not applied. `/stream` may be a scaled playback copy (height at most 1080); those pixels are not that file's `videoWidth` | observed |
 | .model_run_id | string | no | links to `model_runs` | system |
 | .category | string | no | always `machine_detection` | observed |
 | .is_accident_cue | bool | no | weak single-class model; never establishes a collision | observed |
@@ -143,7 +153,9 @@ Reconstruction must exist (else 409 `NO_RECONSTRUCTION`). `scenario_id` omitted 
 | span_ms | int[2] | elements null if no placed events | **case_ms** |
 | lanes | object | no | keys present only if non-empty; events here have non-null `start_ms` |
 | unplaced | Event[] | no | **no usable time**; never ordered against placed events |
-Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`.
+A lone video or sensor is its own reference clock: offset 0, one sync group, `unsynchronized_sources` empty, and its events are placed with `start_ms` equal to that file's own time. Two or more sources with no recorded edge stay in `unsynchronized` and their events stay in `unplaced`. That rule is in `sync.solve`. It is not a measured alignment between cameras.
+
+Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`. `links.stream` is a playback copy that starts at media time 0 (`setpts=PTS-STARTPTS` when the original is transcoded; a remux only when the file is already browser-compatible and already starts at 0).
 
 ## 8. Event — items of `lanes`/`unplaced`; `GET /events/{id}` adds `nearby[]` and `note`; `GET /events/{id}/summary`
 | Field | Type | Null | Unit / convention | Basis |
@@ -210,13 +222,14 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 **Known frontend defects against this contract:** none open. (Fixed: upload polling used non-existent job statuses.) Frontend usage notes are in `docs/frontend/FRONTEND_INTEGRATION_HANDOFF.md`.
 
 ## 13. Requests from frontend to backend (not changes; need agreement before implementation)
-1. **Job progress detail:** an optional `stage_label` or percent per stage so the upload page can show real progress. Today `progress` exists but its meaning per stage is undocumented. Please document it or confirm it is 0..1 within the stage.
-2. **Accident-moment events for real video:** the workspace shows summaries at event timestamps. For real footage it needs `possible_collision` events (media_ms and, for a single video, case_ms with the video as its own reference clock, already implemented). Please confirm that detection thresholds are being tuned on real clips and that no event is emitted without the supporting track evidence.
-3. **Uploaded-video metadata:** `video.pts_start_ms` is returned; please confirm `links.stream` playback copies always start at media 0.
+1. **Job progress detail:** answered in §4. `progress` is 0..1 within the current stage, from frames actually handled. No new field. There is no `stage_label`.
+2. **Accident-moment events for real video:** source events come from `video_events.py` on the tracking run. `possible_collision` requires image-space proximity and an abrupt speed drop; the stored note says that overlap is not physical contact. Thresholds were not lowered for the real clip (storage confidence 0.15, display default 0.25). A single uploaded video is its own reference clock, so those events are placed with `start_ms` equal to media time.
+3. **Uploaded-video metadata:** confirmed in §7. `links.stream` starts at media time 0. `video.pts_start_ms` remains the container PTS of the original's first frame.
 4. **Activity/audit feed, cross-case jobs and findings lists** for the dashboard (`GET /activity`, `GET /jobs?status=`, `GET /findings?review_status=`): today the UI fans out per case.
 5. **A job/stage list per evidence** (`GET /evidence/{id}/jobs`) would remove client-side filtering; optional.
 
 ## Change log
 | Date | Change | Proposed by | Agreed by |
 |---|---|---|---|
-| (initial) | Baseline documented from commit 76cec77 | Claude | pending Cursor |
+| (initial) | Baseline documented from commit 76cec77 | Claude | Cursor, with the corrections in the next row |
+| 2026-10-30 | `progress` defined per stage. `width`/`height` and `bbox` are unrotated container/decoded pixels. Lone source is its own reference clock. Playback copy starts at media 0. No response field added or renamed. | Cursor | |

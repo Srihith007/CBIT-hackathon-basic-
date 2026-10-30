@@ -66,21 +66,23 @@ def _thumbnail(img: np.ndarray, width: int) -> np.ndarray:
     return cv2.resize(img, (width, max(1, round(h * width / w))), interpolation=cv2.INTER_AREA)
 
 
-def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: int, rel_ms: list[float]) -> dict:
+def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: int, rel_ms: list[float], progress=None) -> dict:
     """Decode the video once, sequentially. For wanted frame indices: quality metrics + JPEG thumbnail.
 
-    Also cross-checks the decoder's own timestamps against the container PTS (relative to the first frame)."""
+    Also cross-checks the decoder's own timestamps against the container PTS (relative to the first frame).
+    `progress(done, total)` is called with frames grabbed so far and the container frame count. It is not a clock."""
     thumb_dir.mkdir(parents=True, exist_ok=True)
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError("OpenCV could not open the video")
     frames: dict[int, dict] = {}
     idx, max_dev, first_cv = 0, 0.0, None
+    expected = len(rel_ms)
     try:
         while cap.grab():
             cv_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
             first_cv = cv_ms if first_cv is None else first_cv
-            if idx < len(rel_ms):
+            if idx < expected:
                 max_dev = max(max_dev, abs((cv_ms - first_cv) - rel_ms[idx]))
             if idx in wanted:
                 ok, img = cap.retrieve()
@@ -90,6 +92,8 @@ def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: 
                     cv2.imwrite(str(thumb_dir / name), _thumbnail(img, thumb_width), [cv2.IMWRITE_JPEG_QUALITY, 82])
                     frames[idx] = {"blur": blur, "brightness": bright, "thumb": name, "height": img.shape[0], "width": img.shape[1]}
             idx += 1
+            if progress is not None and expected:
+                progress(idx, expected)
     finally:
         cap.release()
     return {"frames": frames, "decoded_count": idx, "max_pts_deviation_ms": round(max_dev, 3)}

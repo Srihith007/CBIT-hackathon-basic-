@@ -70,8 +70,18 @@ curl -s -H 'Range: bytes=0-1023' $B/evidence/<evidence_id>/original   # original
 ```
 `synthetic` is mandatory on every upload. Interactive docs: `/docs`.
 
+Response field names, nullability, units, and clocks (media time, container PTS, case clock, wall-clock) are listed in [../docs/INTEGRATION_CONTRACT.md](../docs/INTEGRATION_CONTRACT.md). That file is the contract the frontend should bind to. `docs/API_DESIGN.md` is the earlier design note.
+
+## Vision pipeline
+Detection and tracking need the pinned weights and these packages (installed beside `requirements.txt`; weights stay in `data/models` and are not committed):
+
+```bash
+./.venv/bin/pip install -r requirements-vision.txt
+./.venv/bin/python scripts/fetch_models.py --include-accident   # hash-checked; skips files already present
+```
+
 ## Video time convention (Phase 3)
-`time_ms` on every frame is media time from the first frame (container PTS). The playback copy (`/stream`) starts at 0, so the browser's `video.currentTime * 1000` equals `time_ms`. The container's own start offset is `pts_start_ms`. These are not wall-clock times; synchronization comes later.
+`time_ms` on every frame is media time from the first frame (container PTS). The playback copy (`/stream`) starts at 0, so the browser's `video.currentTime * 1000` equals `time_ms`. The container's own start offset is `pts_start_ms`. These are not wall-clock times. One uploaded source is its own case clock. Two sources stay unrelated until a recorded sync edge joins them.
 
 ## Models (Phase 4)
 ```bash
