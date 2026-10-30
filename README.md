@@ -5,6 +5,9 @@ It lines up dashcam and CCTV video, witness statements and vehicle sensor logs o
 **It supports an investigation; it never assigns fault.** All demo data is **synthetic** and labelled as such.
 
 ## Run it
+Already set up? `./run.sh` starts the API and the web app together, then open http://localhost:5173. The site needs **both** running, plus PostgreSQL.
+
+First-time setup:
 ```bash
 cd backend
 python3.11 -m venv .venv && ./.venv/bin/pip install -r requirements.txt     # once
