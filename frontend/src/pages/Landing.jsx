@@ -6,29 +6,34 @@ import { api } from '../api';
 import Timeline from '../components/Timeline';
 
 /** The hero shows the real timeline of the first synthetic demo case, fetched from the API. If there is no case yet it says so. */
-function LivePreview() {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
+function useDemo() {
+  const [state, setState] = useState({ demo: null, data: null, err: null, done: false });
   useEffect(() => {
     (async () => {
       try {
         const cases = (await api.cases()).items;
         const demo = cases.find((c) => /Intersection collision/.test(c.title) && c.designation === 'synthetic') || cases.find((c) => c.designation === 'synthetic');
-        if (!demo) return setErr('No demo case yet. Run scripts/seed_demo.py to create the synthetic demo cases.');
-        const tl = await api.timeline(demo.id);
-        setData({ tl, caseId: demo.id, title: demo.title });
-      } catch (e) {
-        setErr(e.code === 'NO_RECONSTRUCTION' ? 'The demo case has no reconstruction yet.' : 'The API is not reachable. Start the backend on port 8000.');
-      }
+        if (!demo) return setState({ demo: null, data: null, err: 'No demo case yet. Run scripts/seed_demo.py to create the synthetic demo cases.', done: true });
+        try {
+          const tl = await api.timeline(demo.id);
+          setState({ demo, data: { tl, caseId: demo.id, title: demo.title }, err: null, done: true });
+        } catch (e) {
+          setState({ demo, data: null, err: e.code === 'NO_RECONSTRUCTION' ? 'The demo case has no reconstruction yet.' : 'The demo timeline could not be read.', done: true });
+        }
+      } catch { setState({ demo: null, data: null, err: 'The API is not reachable. Start the backend on port 8000.', done: true }); }
     })();
   }, []);
+  return state;
+}
+
+function LivePreview({ data, err }) {
   return (
     <AppWindow title="traceline / demo case · synthetic data">
       {data ? (
         <>
           <p className="t-caption mb-3 text-fg-3">{data.title} · rendered from the API, not an illustration</p>
           <Timeline tl={data.tl} gaps={[]} compact currentMs={0} onSelect={() => {}} activeId={null} />
-          <Link to={`/cases/${data.caseId}`} className="t-small mt-4 inline-block text-accent-text">Open this case →</Link>
+          <Link to={`/reconstruction/${data.caseId}`} className="t-small mt-4 inline-block text-accent-text">Open this case →</Link>
         </>
       ) : (
         <p className="t-small text-fg-2">{err || 'Loading the demo case…'}</p>
@@ -38,6 +43,7 @@ function LivePreview() {
 }
 
 export default function Landing() {
+  const { demo, data, err } = useDemo();
   return (
     <div className="min-h-screen bg-bg text-fg">
       <LandingNav
@@ -47,11 +53,11 @@ export default function Landing() {
       />
       <LandingHero
         badge="Investigation support · never a verdict"
-        title={<>Every second matters.<br /><GradientText>Reconstruct what the evidence shows.</GradientText></>}
+        title={<>Reconstruct the incident.<br /><GradientText>Understand what happened.</GradientText></>}
         description="TraceLine lines up dashcam and CCTV footage, witness statements and vehicle sensor logs on one timeline, shows where they agree and disagree, and says plainly where evidence is missing."
-        actions={<><Button as={Link} to="/dashboard" size="lg">Launch investigation workspace</Button><Button as="a" href="#platform" size="lg" variant="outline">Explore the platform</Button></>}
+        actions={<><Button as={Link} to="/new" size="lg">Start Investigation</Button>{demo ? <Button as={Link} to={`/reconstruction/${demo.id}`} size="lg" variant="outline">View Demo</Button> : <Button size="lg" variant="outline" disabled title={err || 'Looking for a demo case'}>View Demo (no demo case)</Button>}</>}
         bullets={['Observations kept apart from inferences', 'Uncertainty shown on every time', 'Every statement traces to its evidence', 'Runs on a laptop; no GPU needed']}
-        visual={<LivePreview />}
+        visual={<LivePreview data={data} err={err} />}
       />
       <LandingSection id="platform">
         <SectionHeading eyebrow="Platform" title="From fragmented evidence to a checkable timeline" description="Each capability is built so an investigator can see why the system says what it says." />
@@ -82,7 +88,7 @@ export default function Landing() {
           right={{ title: 'Synchronized reconstruction', items: ['One timeline where relations are known', 'Offsets and uncertainty shown', 'Claims checked against what was recorded', 'Gaps listed with what to obtain next'] }}
         />
       </LandingSection>
-      <CtaBand title="Turn fragmented evidence into a clearer timeline." description="The demo cases are synthetic and labelled as such everywhere." actions={<Button as={Link} to="/dashboard" size="lg" variant="outline">Start an investigation</Button>} />
+      <CtaBand title="Turn fragmented evidence into a clearer timeline." description="The demo cases are synthetic and labelled as such everywhere." actions={<Button as={Link} to="/new" size="lg" variant="outline">Start an investigation</Button>} />
       <SiteFooter
         brand={<Brand name="TraceLine" />}
         description="Evidence reconstruction for investigators. Not a fault-finding system."

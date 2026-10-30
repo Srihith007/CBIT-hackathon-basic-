@@ -34,7 +34,11 @@ export const api = {
   timeline: (id, scenario) => req(`/cases/${id}/timeline${q({ scenario_id: scenario })}`),
   incidentEvents: (id, scenario) => req(`/cases/${id}/incident-events${q({ scenario_id: scenario })}`),
   incidentNarrative: (id, scenario) => req(`/cases/${id}/incident-narrative${q({ scenario_id: scenario })}`),
+  storyboard: (id, scenario) => req(`/cases/${id}/storyboard${q({ scenario_id: scenario })}`),
   incidentFrames: (id, scenario, eventId) => req(`/cases/${id}/incident-frames${q({ scenario_id: scenario, event_id: eventId })}`),
+  associations: (id, scenario) => req(`/cases/${id}/associations${q({ scenario_id: scenario })}`),
+  addAssociation: (id, body) => req(`/cases/${id}/associations`, { method: 'POST', body: JSON.stringify(body) }),
+  completeness: (id, scenario) => req(`/cases/${id}/reconstruction/completeness${q({ scenario_id: scenario })}`),
   summary: (eventId) => req(`/events/${eventId}/summary`),
   contradictions: (id, s) => req(`/cases/${id}/contradictions${q({ scenario_id: s })}`),
   corroborations: (id, s) => req(`/cases/${id}/corroborations${q({ scenario_id: s })}`),
@@ -56,6 +60,10 @@ export const api = {
   reports: (id) => req(`/cases/${id}/reports`),
   reportMd: (rid) => req(`/reports/${rid}/markdown`),
   createCase: (body) => req('/cases', { method: 'POST', body: JSON.stringify(body) }),
+  patchCase: (id, body) => req(`/cases/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  sync: (id) => req(`/cases/${id}/sync`),
+  patchSource: (evId, body) => req(`/evidence/${evId}/source`, { method: 'PATCH', body: JSON.stringify(body) }),
+  setClock: (evId, body) => req(`/evidence/${evId}/clock`, { method: 'PUT', body: JSON.stringify(body) }),
   upload: async (caseId, file, kind, synthetic) => {
     const fd = new FormData();
     fd.append('file', file); fd.append('kind', kind); fd.append('synthetic', String(synthetic));
@@ -65,6 +73,10 @@ export const api = {
     return body;
   },
   jobs: (id) => req(`/cases/${id}/jobs`),
+  sensors: (id) => req(`/cases/${id}/sensors`),
+  sensorPreview: (evId, body) => req(`/evidence/${evId}/sensor-preview`, { method: 'POST', body: JSON.stringify(body) }),
+  registerSensor: (id, body) => req(`/cases/${id}/sensors`, { method: 'POST', body: JSON.stringify(body) }),
+  retryJob: (jobId) => req(`/jobs/${jobId}/retry`, { method: 'POST' }),
   addWitness: (id, label) => req(`/cases/${id}/witnesses`, { method: 'POST', body: JSON.stringify({ label }) }),
   addStatement: (wid, text, synthetic) => req(`/witnesses/${wid}/statements`, { method: 'POST', body: JSON.stringify({ text, synthetic }) }),
   fullFrameUrl: (frameId) => `${BASE}/frames/${frameId}/image?full=true`,

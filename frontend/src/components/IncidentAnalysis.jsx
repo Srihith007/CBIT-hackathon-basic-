@@ -64,7 +64,7 @@ const CARD = {
 
 export function IncidentCards({ items, unplaced, activeId, onSelect }) {
   return (
-    <div className="mb-3 space-y-2">
+    <div className="mb-3 max-h-96 space-y-2 overflow-y-auto pr-1" aria-label="Incident events">
       {(items || []).map((item) => (
         <button key={item.id} type="button" data-display={item.display || 'neutral'} aria-pressed={activeId === item.id} onClick={() => onSelect(item)}
                 className={`block w-full rounded-lg border px-3 py-2 text-left ${CARD[item.display] || CARD.neutral}`}>
