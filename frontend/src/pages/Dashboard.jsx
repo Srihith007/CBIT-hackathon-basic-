@@ -83,9 +83,9 @@ export default function Dashboard() {
           <section aria-label="Recent investigations">
             <SectionHeader title="Recent investigations" description="Real and synthetic cases are kept separate and always labelled." />
             <Card padded={false}>
-              <DataTable caption="Investigations" loading={loading} rows={cases} columns={caseCols} onRowClick={(c) => nav(`/cases/${c.id}`)} initialSort={null}
+              <DataTable caption="Investigations" loading={loading} rows={cases} columns={caseCols} onRowClick={(c) => nav(`/reconstruction/${c.id}`)} initialSort={null}
                          renderMobileRow={(c) => (
-                           <Link to={`/cases/${c.id}`} className="flex items-center justify-between gap-3 p-4 hover:no-underline">
+                           <Link to={`/reconstruction/${c.id}`} className="flex items-center justify-between gap-3 p-4 hover:no-underline">
                              <span className="min-w-0"><span className="block truncate text-fg">{c.title}</span><span className="t-caption text-fg-3">{c.code} · {c.counts?.evidence_total ?? 0} evidence</span></span>
                              <DesignationBadge designation={c.designation} />
                            </Link>)}
@@ -101,7 +101,7 @@ export default function Dashboard() {
                 <ul className="divide-y divide-line">
                   {findings.map((f) => (
                     <li key={f.id}>
-                      <Link to={`/cases/${f.case.id}`} className="flex items-start gap-3 p-4 hover:bg-surface-2 hover:no-underline">
+                      <Link to={`/reconstruction/${f.case.id}`} className="flex items-start gap-3 p-4 hover:bg-surface-2 hover:no-underline">
                         <Badge variant={f.kind === 'contradiction' ? 'danger' : f.kind === 'gap' ? 'warning' : 'info'}>{f.kind.replace('_', ' ')}</Badge>
                         <span className="min-w-0 flex-1"><span className="t-small line-clamp-2 text-fg">{f.text}</span><span className="t-caption mt-0.5 block text-fg-3">{f.case.title}</span></span>
                         <DesignationBadge designation={f.case.designation} />

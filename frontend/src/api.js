@@ -56,6 +56,9 @@ export const api = {
   reports: (id) => req(`/cases/${id}/reports`),
   reportMd: (rid) => req(`/reports/${rid}/markdown`),
   createCase: (body) => req('/cases', { method: 'POST', body: JSON.stringify(body) }),
+  patchCase: (id, body) => req(`/cases/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  sync: (id) => req(`/cases/${id}/sync`),
+  setClock: (evId, body) => req(`/evidence/${evId}/clock`, { method: 'PUT', body: JSON.stringify(body) }),
   upload: async (caseId, file, kind, synthetic) => {
     const fd = new FormData();
     fd.append('file', file); fd.append('kind', kind); fd.append('synthetic', String(synthetic));
@@ -65,6 +68,7 @@ export const api = {
     return body;
   },
   jobs: (id) => req(`/cases/${id}/jobs`),
+  retryJob: (jobId) => req(`/jobs/${jobId}/retry`, { method: 'POST' }),
   addWitness: (id, label) => req(`/cases/${id}/witnesses`, { method: 'POST', body: JSON.stringify({ label }) }),
   addStatement: (wid, text, synthetic) => req(`/witnesses/${wid}/statements`, { method: 'POST', body: JSON.stringify({ text, synthetic }) }),
   fullFrameUrl: (frameId) => `${BASE}/frames/${frameId}/image?full=true`,

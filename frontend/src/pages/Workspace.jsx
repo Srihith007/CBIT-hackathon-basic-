@@ -5,6 +5,7 @@ import { FileText, Film, Gauge, PanelLeftClose, PanelLeftOpen, Users } from 'luc
 import Shell from '../layout';
 import { api } from '../api';
 import { useWorkspace } from '../store';
+import { useCaseContext } from '../caseContext';
 import { byStart, findActiveEvent, resolveActive } from '../lib/active';
 import { ACTOR_COLORS, CATEGORY_STYLE } from '../fmt';
 import { formatTime } from '../lib/time';
@@ -49,6 +50,7 @@ export default function Workspace() {
       setErr(null);
       const [c, ev, actors, sc, jobs] = await Promise.all([api.case(caseId), api.evidence(caseId), api.actors(caseId), api.scenarios(caseId), api.jobs(caseId).catch(() => ({ items: [] }))]);
       setScenarios(sc.items);
+      useCaseContext.getState().select(c);
       const videosEv = ev.items.filter((e) => e.kind === 'cctv' || e.kind === 'dashcam');
       const runs = Object.fromEntries(await Promise.all(videosEv.map(async (v) => [v.id, (await api.modelRuns(v.id).catch(() => ({ items: [] }))).items])));
       const chosen = sid || sc.items.find((s) => s.is_baseline)?.id || sc.items[0]?.id;
@@ -189,7 +191,7 @@ export default function Workspace() {
   );
 
   return (
-    <Shell crumbs={crumbs} wide actions={<Button as={Link} to={`/cases/${caseId}/report`} size="sm" variant="outline" icon={FileText}>Report</Button>}>
+    <Shell crumbs={crumbs} wide actions={<Button as={Link} to={`/reports/${caseId}`} size="sm" variant="outline" icon={FileText}>Report</Button>}>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         {!navOpen && <IconButton icon={PanelLeftOpen} label="Show navigation" variant="outline" size="sm" onClick={toggleNav} />}
         <h1 className="text-xl font-semibold">{c.title}</h1>
