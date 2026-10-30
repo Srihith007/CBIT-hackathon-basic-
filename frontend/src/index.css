@@ -1,0 +1,4 @@
+@import './ui-kit/styles/kit.css';
+
+.tl-scroll { scrollbar-width: thin; }
+.mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-variant-numeric: tabular-nums; }

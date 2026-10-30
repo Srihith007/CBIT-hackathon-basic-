@@ -1,0 +1,52 @@
+// Thin fetch wrapper. All data comes from the TraceLine API; nothing is invented client-side.
+const BASE = '/api/v1';
+
+export class ApiError extends Error {
+  constructor(status, body) {
+    super(body?.error?.message || `HTTP ${status}`);
+    this.status = status;
+    this.code = body?.error?.code;
+  }
+}
+
+async function req(path, opts = {}) {
+  const res = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json', 'X-Actor': 'investigator' }, ...opts });
+  const type = res.headers.get('content-type') || '';
+  const body = type.includes('json') ? await res.json() : await res.text();
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body;
+}
+
+const q = (o = {}) => {
+  const p = new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  const s = p.toString();
+  return s ? `?${s}` : '';
+};
+
+export const api = {
+  dashboard: () => req('/dashboard'),
+  cases: () => req('/cases'),
+  case: (id) => req(`/cases/${id}`),
+  evidence: (id) => req(`/cases/${id}/evidence`),
+  actors: (id) => req(`/cases/${id}/actors`),
+  scenarios: (id) => req(`/cases/${id}/reconstruction/scenarios`),
+  buildScenario: (id, body) => req(`/cases/${id}/reconstruction/scenarios`, { method: 'POST', body: JSON.stringify(body) }),
+  timeline: (id, scenario) => req(`/cases/${id}/timeline${q({ scenario_id: scenario })}`),
+  summary: (eventId) => req(`/events/${eventId}/summary`),
+  contradictions: (id, s) => req(`/cases/${id}/contradictions${q({ scenario_id: s })}`),
+  corroborations: (id, s) => req(`/cases/${id}/corroborations${q({ scenario_id: s })}`),
+  gaps: (id, s) => req(`/cases/${id}/gaps${q({ scenario_id: s })}`),
+  findings: (id, s) => req(`/cases/${id}/findings${q({ scenario_id: s })}`),
+  review: (fid, status) => req(`/findings/${fid}`, { method: 'PATCH', body: JSON.stringify({ review_status: status }) }),
+  trajectories: (id, s, frame) => req(`/cases/${id}/trajectories${q({ scenario_id: s, frame })}`),
+  seek: (id, ms, s) => req(`/cases/${id}/seek${q({ case_ms: ms, scenario_id: s })}`),
+  overlays: (evId, from, to) => req(`/evidence/${evId}/overlays${q({ from_ms: from, to_ms: to })}`),
+  sensorRecords: (evId) => req(`/evidence/${evId}/sensor-records${q({ limit: 5000, fields: 'speed,accel_long' })}`),
+  witnesses: (id) => req(`/cases/${id}/witnesses`),
+  claims: (stId) => req(`/statements/${stId}/claims`),
+  report: (id, scenario) => req(`/cases/${id}/reports`, { method: 'POST', body: JSON.stringify({ scenario_id: scenario || null }) }),
+  reports: (id) => req(`/cases/${id}/reports`),
+  reportMd: (rid) => req(`/reports/${rid}/markdown`),
+  streamUrl: (evId) => `${BASE}/evidence/${evId}/stream`,
+  pdfUrl: (rid) => `${BASE}/reports/${rid}/pdf`,
+};
