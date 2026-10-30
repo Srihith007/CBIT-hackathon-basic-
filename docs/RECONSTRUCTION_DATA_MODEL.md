@@ -141,6 +141,34 @@ Timeline gains `hypotheses`. One entry per inference event whose premises all ha
 
 `POST /cases/{id}/evidence` with the same bytes and case returns `200`, `duplicate: true`, the existing evidence id, and `job: null`. Corroboration rules still require two different evidence ids.
 
+## Case incident time and place
+
+`incident_at` and `location_text` are on the case, from create, read, list, and `PATCH`. Both are null until an investigator sets them. Migration `0010` adds the columns as null and does not rewrite existing rows.
+
+`incident_at` is an ISO-8601 instant with a timezone offset. A missing offset is 422 `INCIDENT_TIMEZONE_REQUIRED`. The response repeats the stored offset. `incident_at_note` is a fixed sentence on every case: the server does not assume a zone, does not read the instant from a file, and does not use it to choose frames. `location_text` is free text of at most 500 characters. It is not a geocode.
+
+## Storyboard
+
+`GET /cases/{id}/storyboard?scenario_id` returns 409 `NO_RECONSTRUCTION` when no scenario exists. It does not write a JPEG.
+
+```json
+{"scenario_id": "scn_…", "ordering": "per_source_media_time", "note": "…", "strips": [{"evidence_id": "ev_…", "items": []}], "omitted": []}
+```
+
+Each item is one stored video event (`source_type` `video_cctv` or `video_dashcam`) that has `observations.source_time_ms`:
+
+| Field | Meaning |
+|---|---|
+| before | The stored extracted frame on that file with the greatest `time_ms` strictly before the interval, or null |
+| during | Stored frames whose `frame_no` is in the event's cited frame list. When the event cites none, stored samples whose `time_ms` falls inside the interval |
+| after | The stored extracted frame with the least `time_ms` strictly after the interval, or null |
+| during_basis | `cited_frames` or `samples_inside_interval` |
+| missing | `before`, `during`, and/or `after` when that slot has no stored frame |
+
+A cited frame number with no extracted row is left out. The route does not invent the still. `before` and `after` are not also listed in `during`. Strips are separate per evidence id, ordered by that file's media time. Two cameras are not interleaved, including when their case times overlap. Witness, sensor, and inference events are listed in `omitted` with `not_a_video_event`, `no_source`, or `no_source_time`. `incident_at` is not an input.
+
+Frame objects match incident frames: `evidence_id`, `frame_id`, `frame_no`, `time_ms`, `thumbnail_url`, `full_url`. A frame with no thumbnail has null URLs.
+
 ## What this model does not do
 
 No external camera lookup. No plate, make, or model. No legal fault. No probability on a hypothesis or an association. Synthetic evidence is still rejected on a `real` case before staging. A failed Featherless call does not write model sentences. The narrative document still includes `hypothesis_explanation` built from stored events. See `docs/INTEGRATION_CONTRACT.md` §7a and `docs/FEATHERLESS_INTEGRATION.md`.

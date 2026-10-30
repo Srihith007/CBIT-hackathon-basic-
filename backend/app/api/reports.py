@@ -25,6 +25,13 @@ class ReportBody(BaseModel):
     format: Literal["full", "investigator"] = "full"
 
 
+def list_format(content: dict | None) -> str:
+    """List label. The stored document still says `investigator` or omits format for the 16-section dossier."""
+    if (content or {}).get("format") == "investigator":
+        return "executive"
+    return "full"
+
+
 def out(r: Report, full: bool = False) -> dict:
     return {"id": r.id, "case_id": r.case_id, "scenario_id": r.scenario_id, "version": r.version, "created_at": r.created_at, "validation": r.validation,
             "has_pdf": bool(r.pdf_path)} | ({"content": r.content} if full else {})
@@ -52,7 +59,8 @@ def create(body: ReportBody, case: Case = Depends(get_case), db: Session = Depen
 
 @router.get("/cases/{case_id}/reports")
 def list_reports(case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
-    return {"items": [out(r) for r in db.execute(select(Report).where(Report.case_id == case.id).order_by(Report.version.desc())).scalars()]}
+    rows = db.execute(select(Report).where(Report.case_id == case.id).order_by(Report.version.desc())).scalars()
+    return {"items": [out(r) | {"format": list_format(r.content)} for r in rows]}
 
 
 def _get(db: Session, report_id: str) -> Report:
