@@ -29,7 +29,7 @@ Automated suite, from `backend/`:
 ./.venv/bin/python -m pytest -q --tb=line
 ```
 
-Before the extra report assertions: **162 passed, 17 skipped, 0 failed**, 71.47s. After those assertions were added to the existing real-video test: **162 passed, 17 skipped, 0 failed**, 74.44s. No test failed. The count did not rise, because the new checks are assertions in `tests/test_real_video_pipeline.py`, not a new test function.
+Before the extra report assertions: **162 passed, 17 skipped, 0 failed**, 71.47s. After those assertions were added to the existing real-video test: **162 passed, 17 skipped, 0 failed**, 74.44s. After the follow-up fixes below: **179 passed, 17 skipped, 0 failed**, 66.94s. The 17 new passes are the regression tests for playback size, rotation, synthetic separation, event rules, and the investigator report. No test failed.
 
 Skipped, both runs:
 
@@ -149,10 +149,18 @@ A `possible_collision` on `intersection_demo_share.mp4` has `relative_to_moving_
 
 ## Bugs to fix before the demo
 
-These were not changed in this audit. A fix for item 2 that dropped events or retuned thresholds would change the contract of what the pipeline stores. That was not done.
+Item 1 is fixed in code. Item 2 is partly fixed: the investigator report no longer lists every event, and a new tracking run merges proximity samples. The 1,093 events already stored for the selected case were not deleted. Item 3 is unchanged.
 
-1. **Overlay scale on the demo clip.** `selected_accident.mp4` detections are in a 2392×1352 frame. `/stream` is a transcoded 1910×1080 file (`height` capped at 1080). The other six files were remuxed, so their stream size matches the boxes. The player maps boxes with the element `videoWidth`. On this clip the rectangles will be about 25% too large. Scale from `evidence.video.width` / `height` into the element. This is frontend work. The API already returns both sizes.
+1. **Overlay scale on the demo clip.** Fixed. `make_playback` no longer scales height to 1080, so a file taller than 1080 is remuxed at its own size when it is already H.264 yuv420p. The failing check was reproduced first: the stored playback was 1910×1080 and the original is 2392×1352. Root cause was the `min(ih,1080)` scale, not the detector. A regression test encodes a 640×1200 file and requires the playback copy to stay 640×1200. The derived playback for `ev_289b77d5484e` was remuxed locally to 2392×1352 (342 frames, timing deviation 0). That file is not in git. Any other environment still has the scaled copy until preprocess runs again.
 
-2. **Do not open the demo on the raw event list or the raw report timeline.** The selected case places 1,093 machine events, 943 of them `potential_interaction`, and the report timeline has 1,093 entries. The first placed row is "Possible interaction between tracked road users" at 0 ms. `candidate-02.mp4` places 3,201 events and zero `possible_collision`. Those counts are what `video_events.py` emitted. They are not 943 or 49 impacts. The stored note says image overlap is not physical contact. The default screen has to keep that distinction, or the demo will show a pile of proximity ticks as the incident. Filtering the default list by `event_type` does not require an API change.
+2. **Do not open the demo on the raw event list or the raw report timeline.** The selected case still has its original 1,093 stored events (943 `potential_interaction`, 49 `possible_collision`). They were not deleted. Replaying the updated rules on those same 21 tracks, without a new detector run, emits 139 events: 91 proximity interactions, 4 `possible_collision`, 6 `possible_near_miss`, and the same 9 slowing and 5 stopped events. The investigator report on the stored scenario is 16,931 characters and a 10,253-byte PDF, against the full export of 218,552 characters and a 51,721-byte PDF. The workspace timeline still draws the stored 1,093 until tracking is run again.
 
 3. **Do not demo a second camera, a sensor, or a witness on these files as if they shared a clock or contradicted each other.** Two real files with no edge stay unplaced (3,457 events, seek targets empty). There is no sensor row and no claim row. Showing an empty contradiction list is accurate. Showing a combined timeline would be false.
+
+## Follow-up on this branch
+
+Suite after these changes: **179 passed, 17 skipped, 0 failed**.
+
+- A real case rejects evidence declared `synthetic: true` with `422 SYNTHETIC_IN_REAL_CASE`. The check is in `ingest_upload`, so a direct API call and a typed witness statement hit it. A real file in a real case, a synthetic file in a synthetic case, and both declarations in a mixed case are accepted.
+- Proximity samples join when the time gap is at most `period_ms * segment_gap_factor` (default 1.5), not when the raw frame numbers differ by at most 2. Overlap and a small gap are labeled `box_overlap` or `proximity`. `possible_collision` still requires overlap and an abrupt speed drop. Slowing and stopping stay separate rules. A leave event records `missed_detection` or `frame_border`. Detector confidence thresholds were not raised. These clips still cannot support a claim of physical contact, fault, or a speed in metres per second: there is no calibration, and image overlap is not contact. On this clip the accident cue does not decide the 4 remaining collision candidates.
+- Rotation 0, 90, 180, and 270 is taken once from the display matrix. ffmpeg bakes it into the playback file and OpenCV's orientation flag applies it on decode. A second rotate is not applied. 45° fails validation with the message that only 0, 90, 180, and 270 can be applied. `video.width` and `video.height` stay the coded size. `frame_size` is the upright size.

@@ -14,14 +14,15 @@ export default function ReportPage() {
 
   const open = async (r) => { setReport(r); setMd(await api.reportMd(r.id)); };
   useEffect(() => { api.reports(caseId).then(async (r) => { if (r.items[0]) open((await fetch(`/api/v1/reports/${r.items[0].id}`).then((x) => x.json()))); }).catch((e) => setErr(e.message)); }, [caseId]);
-  const make = async () => { setBusy(true); setErr(null); try { await open(await api.report(caseId)); } catch (e) { setErr(e.message); } setBusy(false); };
+  const make = async (format) => { setBusy(true); setErr(null); try { await open(await api.report(caseId, null, format)); } catch (e) { setErr(e.message); } setBusy(false); };
 
   return (
     <Shell crumbs={[{ label: 'Workspace', to: `/cases/${caseId}` }, { label: 'Report' }]}>
     <div className="mx-auto max-w-4xl">
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">Investigation report</h1>
-        <Button onClick={make} loading={busy} className="ml-auto" variant="primary">{busy ? 'Building…' : report ? 'Generate a new version' : 'Generate report'}</Button>
+        <Button onClick={() => make('full')} loading={busy} variant="outline">Full export</Button>
+        <Button onClick={() => make('investigator')} loading={busy} className="ml-auto" variant="primary">{busy ? 'Building…' : report ? 'Generate investigator report' : 'Generate report'}</Button>
       </div>
       {err && <Alert variant="danger" title="Could not build the report">{err}</Alert>}
       {report && (

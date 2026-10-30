@@ -6,7 +6,9 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-VALIDATOR_VERSION = "1"
+from app.services.video import UnsupportedRotation, canonical_rotation
+
+VALIDATOR_VERSION = "2"
 
 
 def _result(errors: list[str], warnings: list[str], metadata: dict, checks: dict) -> dict:
@@ -51,12 +53,17 @@ def validate_video(path: Path) -> dict:
     if width <= 0 or height <= 0:
         errors.append("video has no valid dimensions")
 
-    rotation = None
+    raw_rotation = None
     for sd in video.get("side_data_list", []) or []:
         if "rotation" in sd:
-            rotation = int(sd["rotation"])
-    if rotation is None and (video.get("tags") or {}).get("rotate"):
-        rotation = int(video["tags"]["rotate"])
+            raw_rotation = sd["rotation"]
+    if raw_rotation is None and (video.get("tags") or {}).get("rotate"):
+        raw_rotation = video["tags"]["rotate"]
+    rotation = None
+    try:
+        rotation = canonical_rotation(raw_rotation)
+    except UnsupportedRotation as exc:
+        errors.append(str(exc))
 
     created = (fmt.get("tags") or {}).get("creation_time")
     created_dt = None

@@ -2,6 +2,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, PlainTextResponse
+from typing import Literal
+
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ router = APIRouter(tags=["reports"])
 
 class ReportBody(BaseModel):
     scenario_id: str | None = None
+    format: Literal["full", "investigator"] = "full"
 
 
 def out(r: Report, full: bool = False) -> dict:
@@ -31,7 +34,7 @@ def out(r: Report, full: bool = False) -> dict:
 def create(body: ReportBody, case: Case = Depends(get_case), db: Session = Depends(get_db), settings: Settings = Depends(get_settings), who: str = Depends(get_actor)) -> dict:
     """Assemble and validate a report from a reconstruction scenario. A report that fails validation is stored with its failed checks and is not offered as final."""
     scn = get_scenario(db, case, body.scenario_id)
-    content = rep.build(db, case, scn, who)
+    content = rep.build_investigator(db, case, scn, who) if body.format == "investigator" else rep.build(db, case, scn, who)
     validation = rep.validate(content)
     version = (db.execute(select(func.max(Report.version)).where(Report.case_id == case.id)).scalar() or 0) + 1
     r = Report(case_id=case.id, scenario_id=scn.id, version=version, content=content, validation=validation)

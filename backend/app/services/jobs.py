@@ -175,7 +175,8 @@ def handle_preprocess(session: Session, settings: Settings, job: ProcessingJob) 
     idx, truncated = vid.choose_sampled(rel, params["sample_fps"], params["max_frames"])
     # Planned units: every container frame, plus the playback copy. The fraction is frames grabbed / (frames + 1).
     dec = vid.decode_selected(path, set(idx), out / "thumbs", params["thumb_width"], rel,
-                              progress=lambda done, total: publish_progress(done / (total + 1)))
+                              progress=lambda done, total: publish_progress(done / (total + 1)),
+                              rotation=vm.rotation if vm else None)
 
     rows = []
     for i, t in enumerate(rel):
@@ -231,7 +232,7 @@ def handle_preprocess(session: Session, settings: Settings, job: ProcessingJob) 
 
 def handle_interval(session: Session, settings: Settings, job: ProcessingJob) -> str | None:
     """Higher-rate thumbnails for [from_ms, to_ms]. Requires an existing frame index; never changes frame times."""
-    ev, _, path = _video_for(session, settings, job)
+    ev, vm, path = _video_for(session, settings, job)
     p = job.params or {}
     frames = session.execute(select(ExtractedFrame).where(ExtractedFrame.evidence_id == ev.id).order_by(ExtractedFrame.frame_no)).scalars().all()
     if not frames:
@@ -249,7 +250,8 @@ def handle_interval(session: Session, settings: Settings, job: ProcessingJob) ->
     out = derived_dir(settings.storage_path, ev.case_id, ev.id, run.id)
     indexed = len(frames) or 1
     dec = vid.decode_selected(path, wanted, out / "thumbs", settings.thumb_width, [float(f.time_ms) for f in frames],
-                              progress=lambda done, total: publish_progress(done / indexed))
+                              progress=lambda done, total: publish_progress(done / indexed),
+                              rotation=vm.rotation if vm else None)
     rows = [{"evidence_id": ev.id, "frame_no": f.frame_no, "time_ms": f.time_ms, "sampled": True,
              "thumbnail_path": _rel(settings, out / "thumbs" / dec["frames"][f.frame_no]["thumb"]),
              "blur": dec["frames"][f.frame_no]["blur"], "brightness": dec["frames"][f.frame_no]["brightness"]}
@@ -263,7 +265,7 @@ def handle_interval(session: Session, settings: Settings, job: ProcessingJob) ->
 
 def handle_detect(session: Session, settings: Settings, job: ProcessingJob) -> str | None:
     """Run the detector (required) and the accident cue (optional) over the sampled frames. One model run per model."""
-    ev, _, path = _video_for(session, settings, job)
+    ev, vm, path = _video_for(session, settings, job)
     p = job.params or detect_params(settings)
     frames = session.execute(select(ExtractedFrame).where(ExtractedFrame.evidence_id == ev.id, ExtractedFrame.sampled.is_(True))
                              .order_by(ExtractedFrame.frame_no)).scalars().all()
@@ -310,7 +312,7 @@ def handle_detect(session: Session, settings: Settings, job: ProcessingJob) -> s
             if n_frames:
                 publish_progress((pass_i + done / n_frames) / n_passes)
 
-        for idx, boxes in detection.detect_stream(vid.iter_frames(path, set(by_no)), model, imgsz=p["imgsz"], conf=conf,
+        for idx, boxes in detection.detect_stream(vid.iter_frames(path, set(by_no), vm.rotation if vm else None), model, imgsz=p["imgsz"], conf=conf,
                                                    device=device, keep=keep, stats=stats, progress=_inferred):
             for b in boxes:
                 by_class[b.class_name] = by_class.get(b.class_name, 0) + 1
@@ -347,6 +349,7 @@ def handle_track(session: Session, settings: Settings, job: ProcessingJob) -> st
     fps = float((pre.params or {}).get("sample_fps", settings.sample_fps)) if pre else settings.sample_fps
     p = tracking.default_params(ev.kind, fps) | {k: v for k, v in (job.params or {}).items() if k != "version"}
     p["detector_run"] = det_run.id
+    p["video_events"] = video_events.VIDEO_EVENTS_VERSION
     ph = params_hash(p)
     prior = session.execute(select(ModelRun).where(ModelRun.case_id == ev.case_id, ModelRun.stage == STAGE_TRACK, ModelRun.input_sha256 == ev.sha256,
                                                    ModelRun.params_hash == ph, ModelRun.status == "completed")).scalars().first()
@@ -371,10 +374,11 @@ def handle_track(session: Session, settings: Settings, job: ProcessingJob) -> st
                    params=p, params_hash=ph, input_sha256=ev.sha256, device="cpu", started_at=_now(), status="running")
     session.add(run)
     session.flush()
-    images = vid.iter_frames(path, {f.frame_no for f in ordered}) if p["tracker"] == "botsort" else None
+    images = vid.iter_frames(path, {f.frame_no for f in ordered}, vm.rotation if vm else None) if p["tracker"] == "botsort" else None
     assign = tracking.associate(ordered, tracking.make_tracker(p), images,
                                 progress=lambda done, total: publish_progress(done / total if total else 0.0))
-    tracks, cands = tracking.build_tracks(ordered, assign, p, (vm.width, vm.height) if vm else None)
+    upright = vid.display_size(vm.width, vm.height, vm.rotation) if vm else None
+    tracks, cands = tracking.build_tracks(ordered, assign, p, upright)
     for t in tracks:
         session.add(VehicleTrack(evidence_id=ev.id, model_run_id=run.id, track_id=t["track_id"], class_name=t["class"],
                                  first_frame=t["first_frame"], last_frame=t["last_frame"], duration_ms=t["duration_ms"],
@@ -391,7 +395,8 @@ def handle_track(session: Session, settings: Settings, job: ProcessingJob) -> st
     steps = [b.time_ms - a.time_ms for a, b in zip(ordered, ordered[1:])]
     period_ms = float(statistics.median(steps)) if steps else 1000.0 / fps
     vevents = video_events.generate(
-        [{"track_id": t["track_id"], "class": t["class"], "points": t["points"]} for t in tracks], kind=ev.kind, period_ms=period_ms,
+        [{"track_id": t["track_id"], "class": t["class"], "points": t["points"], "continuity": t["continuity"]} for t in tracks],
+        kind=ev.kind, period_ms=period_ms,
         video_duration_ms=float(vm.duration_ms) if vm and vm.duration_ms else float(ordered[-1].time_ms if ordered else 0), cues=cues)
     track_pk = {t["track_id"]: None for t in tracks}
     session.flush()

@@ -2,6 +2,7 @@
 import hashlib
 import json
 import subprocess
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -263,3 +264,54 @@ def test_stage_handlers_refuse_non_video(client, stage):
     jobs.run_pending(client.factory, client.settings)
     j = client.get(f"/api/v1/jobs/{jid}").json()
     assert j["status"] == "failed" and "dashcam/cctv" in j["error"]["message"]
+
+
+def _encode(args, dest: Path) -> Path:
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", *args, str(dest)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return dest
+
+
+def _stream(path) -> dict:
+    out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(path)], capture_output=True, text=True).stdout
+    return json.loads(out)["streams"][0]
+
+
+def test_playback_keeps_a_frame_taller_than_1080(tmp_path):
+    """The failing audit check: a 1352-tall source was scaled to 1080, so videoWidth no longer matched the boxes."""
+    src = _encode(["-f", "lavfi", "-i", "testsrc=duration=0.4:size=640x1200:rate=10", "-pix_fmt", "yuv420p", "-c:v", "libx264"], tmp_path / "tall.mp4")
+    dst = tmp_path / "playback.mp4"
+    info = vid.make_playback(src, dst, 0.0, None)
+    stream = _stream(dst)
+    assert info["mode"] == "remux" and info["timing_preserved"]
+    assert int(stream["width"]) == 640 and int(stream["height"]) == 1200
+
+
+@pytest.mark.parametrize("angle,size", [(90, (240, 320)), (180, (320, 240)), (270, (240, 320))])
+def test_display_rotation_is_baked_once_and_matches_the_decoder(tmp_path, angle, size):
+    base = _encode(["-f", "lavfi", "-i", "color=c=black:s=320x240:d=0.3:r=10", "-vf", "drawbox=x=0:y=0:w=40:h=240:color=red:t=fill",
+                    "-pix_fmt", "yuv420p", "-c:v", "libx264"], tmp_path / "base.mp4")
+    src = _encode(["-display_rotation", str(angle), "-i", str(base), "-c", "copy"], tmp_path / f"r{angle}.mp4")
+    dst = tmp_path / "playback.mp4"
+    info = vid.make_playback(src, dst, 0.0, angle if angle != 270 else -90)
+    stream = _stream(dst)
+    assert info["mode"] == "transcode" and info["timing_preserved"]
+    assert (int(stream["width"]), int(stream["height"])) == size
+    assert not any("rotation" in (sd or {}) for sd in stream.get("side_data_list") or [])
+    upright = next(vid.iter_frames(src, {0}, angle if angle != 270 else -90))[1]
+    played = next(vid.iter_frames(dst, {0}, None))[1]
+    assert upright.shape == played.shape == (size[1], size[0], 3)
+    assert abs(upright.astype(np.int16) - played.astype(np.int16)).mean() < 25
+
+
+def test_unsupported_rotation_is_rejected(client, tmp_path):
+    base = _encode(["-f", "lavfi", "-i", "testsrc=duration=0.3:size=320x240:rate=10", "-pix_fmt", "yuv420p", "-c:v", "libx264"], tmp_path / "base.mp4")
+    src = _encode(["-display_rotation", "45", "-i", str(base), "-c", "copy"], tmp_path / "r45.mp4")
+    with pytest.raises(vid.UnsupportedRotation, match="45"):
+        vid.make_playback(src, tmp_path / "no.mp4", 0.0, 45)
+    case = make_case(client)
+    eid = upload_video(client, case["id"], src)
+    ev = client.get(f"/api/v1/evidence/{eid}").json()
+    assert ev["status"] == "invalid"
+    assert any("45" in err and "270" in err for err in ev["validation"]["errors"])
+    assert jobs_of(client, case["id"], "preprocess") == []

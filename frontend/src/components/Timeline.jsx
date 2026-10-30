@@ -80,8 +80,8 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
   return (
     <div>
       {!compact && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <FilterChips label="Event category" value={filter} onChange={setFilter} items={FILTERS.map((f) => ({ ...f, count: counts[f.id] }))} className="[&_button]:h-8 [&_button]:px-3" />
+        <div className="mb-3 flex items-center gap-2">
+          <FilterChips label="Event category" value={filter} onChange={setFilter} items={FILTERS.map((f) => ({ ...f, count: counts[f.id] }))} className="min-w-0 flex-1 [@media(max-height:1100px)]:!flex-nowrap [@media(max-height:1100px)]:overflow-x-auto [&_button]:h-8 [&_button]:shrink-0 [&_button]:px-3" />
           <div className="ml-auto flex items-center gap-1.5">
             <IconButton icon={Minus} label="Zoom out" variant="outline" size="sm" onClick={() => zoom(1.5)} />
             <IconButton icon={Plus} label="Zoom in" variant="outline" size="sm" onClick={() => zoom(1 / 1.5)} />

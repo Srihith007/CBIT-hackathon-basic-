@@ -12,7 +12,67 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-PREPROCESS_VERSION = "1"
+PREPROCESS_VERSION = "2"
+
+
+class UnsupportedRotation(ValueError):
+    """The container display matrix is not 0, 90, 180 or 270 degrees."""
+
+
+def canonical_rotation(value) -> int | None:
+    """Normalize a display-matrix angle to 90, 180 or 270. None means the coded frame is already upright.
+
+    ffprobe reports 180° as -180 and 270° as -90. Other angles, including 45°, cannot be baked once into
+    upright pixels, so they are refused instead of being ignored or applied twice.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        r = int(value) % 360
+    except (TypeError, ValueError) as exc:
+        raise UnsupportedRotation(
+            f"Display rotation {value!r} cannot be applied. Supported rotations are 0, 90, 180 and 270 degrees, "
+            "taken once from the container display matrix."
+        ) from exc
+    if r < 0:
+        r += 360
+    if r == 0:
+        return None
+    if r not in (90, 180, 270):
+        raise UnsupportedRotation(
+            f"Display rotation {value}° cannot be applied. Supported rotations are 0, 90, 180 and 270 degrees, "
+            "taken once from the container display matrix."
+        )
+    return r
+
+
+def display_size(width: int, height: int, rotation: int | None) -> tuple[int, int]:
+    """Pixel size of an upright frame. 90° and 270° swap the coded width and height; 180° does not."""
+    if canonical_rotation(rotation) in (90, 270):
+        return int(height), int(width)
+    return int(width), int(height)
+
+
+def _open_capture(path: Path, rotation: int | None):
+    """Open a video the way the player will show the playback copy.
+
+    OpenCV's orientation flag applies the display matrix once. This function does not rotate again.
+    A build that leaves the flag off cannot be used for a rotated file, because the boxes would not
+    match an upright playback file.
+    """
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise RuntimeError("OpenCV could not open the video")
+    rot = canonical_rotation(rotation)
+    if rot:
+        prop = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
+        if prop is None or cap.get(prop) < 0.5:
+            cap.release()
+            raise RuntimeError(
+                f"Display rotation {rot}° cannot be applied: OpenCV is not honoring the container display matrix. "
+                "Refusing to decode so detection coordinates are not stored in a different orientation than the player."
+            )
+    return cap
 
 
 def _run(cmd: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
@@ -66,15 +126,13 @@ def _thumbnail(img: np.ndarray, width: int) -> np.ndarray:
     return cv2.resize(img, (width, max(1, round(h * width / w))), interpolation=cv2.INTER_AREA)
 
 
-def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: int, rel_ms: list[float], progress=None) -> dict:
+def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: int, rel_ms: list[float], progress=None, rotation: int | None = None) -> dict:
     """Decode the video once, sequentially. For wanted frame indices: quality metrics + JPEG thumbnail.
 
     Also cross-checks the decoder's own timestamps against the container PTS (relative to the first frame).
     `progress(done, total)` is called with frames grabbed so far and the container frame count. It is not a clock."""
     thumb_dir.mkdir(parents=True, exist_ok=True)
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        raise RuntimeError("OpenCV could not open the video")
+    cap = _open_capture(path, rotation)
     frames: dict[int, dict] = {}
     idx, max_dev, first_cv = 0, 0.0, None
     expected = len(rel_ms)
@@ -99,11 +157,12 @@ def decode_selected(path: Path, wanted: set[int], thumb_dir: Path, thumb_width: 
     return {"frames": frames, "decoded_count": idx, "max_pts_deviation_ms": round(max_dev, 3)}
 
 
-def iter_frames(path: Path, wanted: set[int]):
-    """Decode sequentially and yield (frame_index, BGR image) for the wanted indices (presentation order, same as the index)."""
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        raise RuntimeError("OpenCV could not open the video")
+def iter_frames(path: Path, wanted: set[int], rotation: int | None = None):
+    """Decode sequentially and yield (frame_index, BGR image) for the wanted indices (presentation order, same as the index).
+
+    `rotation` is the container display matrix. The capture applies it once; the image is not rotated again here.
+    """
+    cap = _open_capture(path, rotation)
     last = max(wanted) if wanted else -1
     idx = 0
     try:
@@ -127,20 +186,28 @@ def _video_stream(path: Path) -> dict:
 
 
 def browser_compatible(stream: dict, pts_start_ms: float, rotation: int | None) -> bool:
+    # Height is not capped. A 1080 scale made /stream smaller than the decoded frame, so boxes drawn with
+    # videoWidth no longer matched the detections. A rotated file is transcoded so the matrix is baked once.
     return (stream.get("codec_name") == "h264" and stream.get("pix_fmt") == "yuv420p" and "mp4" in stream.get("_format", "")
-            and not rotation and int(stream.get("height") or 0) <= 1080 and abs(pts_start_ms) < 0.5)
+            and not canonical_rotation(rotation) and abs(pts_start_ms) < 0.5)
 
 
 def make_playback(src: Path, dst: Path, pts_start_ms: float, rotation: int | None) -> dict:
-    """Write a browser-safe H.264 MP4 that starts at t=0 and keeps every frame's relative timing. Then verify that it does."""
+    """Write a browser-safe H.264 MP4 that starts at t=0 and keeps every frame's relative timing. Then verify that it does.
+
+    The copy keeps the upright frame size. ffmpeg applies a display matrix once, before the filter graph, and the
+    output has no matrix of its own. Do not add a rotate filter and do not pass -noautorotate: either one turns
+    that single rotation into a second one. Detection uses the same upright pixels.
+    """
+    rot = canonical_rotation(rotation)
     stream = _video_stream(src)
-    if browser_compatible(stream, pts_start_ms, rotation):
+    if browser_compatible(stream, pts_start_ms, rot):
         mode = "remux"
         cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", str(dst)]
     else:
         mode = "transcode"
         cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-map", "0:v:0",
-               "-vf", "setpts=PTS-STARTPTS,scale=-2:'trunc(min(ih\\,1080)/2)*2',format=yuv420p",
+               "-vf", "setpts=PTS-STARTPTS,format=yuv420p",
                "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
         if stream.get("_audio"):
             cmd += ["-map", "0:a:0", "-af", "asetpts=PTS-STARTPTS", "-c:a", "aac", "-b:a", "96k"]

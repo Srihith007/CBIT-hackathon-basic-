@@ -116,7 +116,7 @@ Pipeline: upload → validate → preprocess → detect → track run automatica
 | detections[].id | int | no | | system |
 | .class | string | no | `car`\|`truck`\|`bus`\|`motorcycle`\|`bicycle`\|`pedestrian`\|`traffic_light`\|`accident_cue` | observed |
 | .confidence | float | no | 0..1, **not** a calibrated probability | observed |
-| .bbox | [x1,y1,x2,y2] float | no | pixels of the OpenCV-decoded frame (`frame_size`). `video.rotation` is not applied. `/stream` may be a scaled playback copy (height at most 1080); those pixels are not that file's `videoWidth` | observed |
+| .bbox | [x1,y1,x2,y2] float | no | pixels of the upright decoded frame (`frame_size`), the same grid as `/stream`. A display rotation of 90° or 270° is applied once, so `frame_size` is swapped relative to coded `video.width` / `video.height`. 180° does not swap. The playback file is not scaled and does not keep a second display matrix | observed |
 | .model_run_id | string | no | links to `model_runs` | system |
 | .category | string | no | always `machine_detection` | observed |
 | .is_accident_cue | bool | no | weak single-class model; never establishes a collision | observed |
@@ -155,7 +155,7 @@ Reconstruction must exist (else 409 `NO_RECONSTRUCTION`). `scenario_id` omitted 
 | unplaced | Event[] | no | **no usable time**; never ordered against placed events |
 A lone video or sensor is its own reference clock: offset 0, one sync group, `unsynchronized_sources` empty, and its events are placed with `start_ms` equal to that file's own time. Two or more sources with no recorded edge stay in `unsynchronized` and their events stay in `unplaced`. That rule is in `sync.solve`. It is not a measured alignment between cameras.
 
-Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`. `links.stream` is a playback copy that starts at media time 0 (`setpts=PTS-STARTPTS` when the original is transcoded; a remux only when the file is already browser-compatible and already starts at 0).
+Related: `GET /cases/{id}/seek?case_ms&scenario_id` → `{case_ms, targets:[{evidence_id, media_ms, bound_ms, group}], unsynchronized:[evidence_id]}`; `GET /cases/{id}/sync` (groups, offsets, edges); `GET /cases/{id}/playback-map?evidence_id&video_time_ms`. `links.stream` is a playback copy that starts at media time 0 (`setpts=PTS-STARTPTS` when the original is transcoded; a remux only when the file is already H.264 yuv420p MP4, upright, and already starts at 0). Height is not capped. A 90/180/270 display matrix is baked into that file once. Any other angle is rejected at validation (`Display rotation N° cannot be applied`).
 
 ## 8. Event — items of `lanes`/`unplaced`; `GET /events/{id}` adds `nearby[]` and `note`; `GET /events/{id}/summary`
 | Field | Type | Null | Unit / convention | Basis |
@@ -214,7 +214,7 @@ Gaps between samples are **not** interpolated by the backend.
 Details by `ref_ids[0]`: `GET /cases/{id}/contradictions` → `{items:[{id, rule_id, event_a, event_b, strength(clear|marginal), basis{…, benign_explanations[]}, explanation, unresolved_questions[], review_status}]}`; `/corroborations` → `{items:[{id, rule_id, events[], independent, independence_reason, temporal_relation, explanation, review_status}]}`; `/gaps` → `{items:[{id, gap_type, scope{evidence_id?, case_from_ms?, case_to_ms?, …}, details, recommendation, refs[]}]}` (`scope.case_*_ms` are **case_ms**).
 
 ## 11. Other endpoints the frontend uses (shapes unchanged)
-Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` → `{id, version, validation{passed, checks[]}, has_pdf, content}`, `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
+Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` body `{scenario_id?, format?}`. `format` is `full` (default, 16 sections, unchanged) or `investigator` (four sections; see `docs/REPORT_FORMAT.md`). Response `{id, version, validation{passed, checks[]}, has_pdf, content}` is unchanged. `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
 
 ## 12. Frontend consumption (Claude) — what is wired and what is not
 Wired to real endpoints: dashboard, case list, workspace (evidence, actors, scenarios, timeline, contradictions, corroborations, gaps, findings, trajectories, seek, overlays, sensor-records, summaries, witnesses/claims), report generate/view, upload + job polling + scenario build.
@@ -233,3 +233,4 @@ Frontend rules that follow from this contract: it displays `synthetic`, `oracle:
 |---|---|---|---|
 | (initial) | Baseline documented from commit 76cec77 | Claude | Cursor, with the corrections in the next row |
 | 2026-10-30 | `progress` defined per stage. `width`/`height` and `bbox` are unrotated container/decoded pixels. Lone source is its own reference clock. Playback copy starts at media 0. No response field added or renamed. | Cursor | |
+| 2026-10-30 | Playback is no longer scaled to 1080. `bbox` / `frame_size` are the upright frame, matching `/stream`. `video.width` / `video.height` stay the coded size. Optional report `format` defaults to `full`. No response field renamed. | Cursor | |

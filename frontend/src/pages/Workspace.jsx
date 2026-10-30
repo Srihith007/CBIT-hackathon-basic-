@@ -118,10 +118,10 @@ export default function Workspace() {
         <ErrorState title="No reconstruction yet" description="The pipeline has not produced a reconstruction for this case. Open the dashboard to check processing jobs." />
       ) : (
         <>
-          <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_390px]">
-            {/* centre: video + timeline */}
-            <div className="order-1 min-w-0 space-y-4 xl:order-2">
-              <Card as="section" padded={false} className="p-3 sm:p-4" aria-label="Evidence video">
+          <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_390px] [@media(max-height:1100px)]:h-[calc(100dvh-9.5rem)] [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:overflow-hidden">
+            {/* centre: video + timeline. On a short window the timeline keeps a share of the column and the video card scrolls inside itself. */}
+            <div className="order-1 min-w-0 space-y-4 xl:order-2 [@media(max-height:1100px)]:flex [@media(max-height:1100px)]:h-full [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-col [@media(max-height:1100px)]:gap-3 [@media(max-height:1100px)]:space-y-0 [@media(max-height:1100px)]:overflow-hidden">
+              <Card as="section" padded={false} className="p-3 sm:p-4 [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-1 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence video">
                 <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={events} onSelectEvent={pick} />
                 <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pt-3">
                   <Checkbox label="Boxes" checked={overlays.boxes} onChange={() => useWorkspace.getState().toggleOverlay('boxes')} />
@@ -129,7 +129,7 @@ export default function Workspace() {
                   <span className="t-caption ml-auto text-fg-3">Boxes are the stored detections on sampled frames. Dashed = recovered first observation. Nothing is drawn between samples.</span>
                 </div>
               </Card>
-              <Card as="section" padded={false} className="p-3 sm:p-4" aria-label="Timeline">
+              <Card as="section" padded={false} className="p-3 sm:p-4 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${events.length} placed events · ${data.tl.unplaced.length} unplaced`} className="!mb-3" />
                 <Timeline tl={data.tl} gaps={data.gaps} onSelect={pick} onSeek={seekTo} />
               </Card>
@@ -146,7 +146,7 @@ export default function Workspace() {
             </Card>
 
             {/* left: sources, actors, events */}
-            <Card as="nav" padded={false} className="order-3 h-fit p-4 xl:order-1" aria-label="Evidence navigation">
+            <Card as="nav" padded={false} className="order-3 h-fit p-4 xl:order-1 [@media(max-height:1100px)]:max-h-full [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence navigation">
               <h2 className="t-eyebrow mb-2 text-fg-3">Sources</h2>
               <ul className="space-y-1.5">
                 {data.ev.filter((e) => ['cctv', 'dashcam', 'sensor_csv'].includes(e.kind)).map((e) => {

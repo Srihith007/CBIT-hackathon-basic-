@@ -140,3 +140,77 @@ def test_pedestrian_near_miss_has_no_overlap_but_one_party_stops():
 
 def test_short_tracks_are_ignored():
     assert gen([track(1, "car", lambda k: (50 + 25 * k, 200), 2)]) == []
+
+
+def sparse(tid, fn, n, step=5, w=60, h=40, cls="car"):
+    """Sampled frames whose frame numbers are several apart, as a 5 fps sample of a faster video is."""
+    pts = []
+    for k in range(n):
+        x, y = fn(k)
+        pts.append({"frame_no": k * step, "time_ms": k * PERIOD, "bbox": [x - w / 2, y - h, x + w / 2, y], "anchor": [x, y], "confidence": 0.9})
+    return {"track_id": tid, "class": cls, "points": pts}
+
+
+def test_sampled_frame_gaps_join_into_one_proximity_segment():
+    a = sparse(1, lambda k: (100 + 10 * k, 200), 8)
+    b = sparse(2, lambda k: (140 + 10 * k, 200), 8)  # boxes overlap the whole way; frame numbers jump by 5
+    ev = gen([a, b], dur=8000)
+    assert len(of(ev, "potential_interaction")) == 1
+    assert of(ev, "possible_collision") == [] and of(ev, "possible_near_miss") == []
+    assert of(ev, "potential_interaction")[0]["observations"]["relation"] == "box_overlap"
+
+
+def test_a_real_time_gap_stays_two_segments_and_the_gap_factor_is_configurable():
+    def burst(tid, k0, n):
+        pts = []
+        for k in range(n):
+            i = k0 + k
+            x = 100 + 5 * i
+            pts.append({"frame_no": i * 5, "time_ms": i * PERIOD, "bbox": [x - 30, 160, x + 30, 200], "anchor": [x, 200], "confidence": 0.9})
+        return {"track_id": tid, "class": "car", "points": pts}
+
+    def pair(k0):
+        return burst(1, k0, 4), burst(2, k0, 4)
+
+    a1, b1 = pair(0)
+    a2, b2 = pair(20)  # 3.2 s later, far beyond one sample period
+    a = {"track_id": 1, "class": "car", "points": a1["points"] + a2["points"]}
+    b = {"track_id": 2, "class": "car", "points": b1["points"] + b2["points"]}
+    assert len(of(gen([a, b], dur=20000), "potential_interaction")) == 2
+    tight = gen([sparse(1, lambda k: (100, 200), 6), sparse(2, lambda k: (130, 200), 6)], dur=8000, overrides={"segment_gap_factor": 0.1})
+    assert len(of(tight, "potential_interaction")) == 6  # samples 200 ms apart no longer join
+
+
+def test_sparse_overlap_and_a_stop_is_still_one_collision_candidate():
+    a, b = crossing_pair()
+    stop_dead_at_contact(a, b)
+    for tr in (a, b):
+        tr["points"] = [{**p, "frame_no": p["frame_no"] * 5} for p in tr["points"]]
+    ev = gen([a, b], dur=8000)
+    assert len(of(ev, "potential_interaction")) == 1 and len(of(ev, "possible_collision")) == 1
+    assert of(ev, "possible_collision")[0]["observations"]["relation"] == "box_overlap"
+
+
+def test_slowing_is_not_a_stop_and_a_stop_is_not_only_slowing():
+    def fn(k):
+        x = 0.0
+        for i in range(k):
+            x += 25 if i < 15 else max(0.0, 25 - 6 * (i - 14))
+        return (50 + x, 200)
+
+    ev = gen([track(1, "car", fn, 40)], dur=8000)
+    slow, stop = of(ev, "vehicle_slowing")[0], of(ev, "vehicle_stopped")[0]
+    assert slow["observations"]["motion"] == "slowing" and "not a stop" in slow["observations"]["note"]
+    assert stop["observations"]["motion"] == "stopped" and "not only slowing" in stop["observations"]["note"]
+    assert slow["rule_id"] != stop["rule_id"]
+
+
+def test_leave_reason_distinguishes_a_missed_detection_from_the_frame_border():
+    base = track(1, "car", lambda k: (50 + 25 * k, 200), 20, start=10)
+    gapped = dict(base, continuity={"gaps": [{"after_frame": 12, "missing_sampled_frames": 2}], "ends_at_frame_border": False})
+    bordered = dict(base, continuity={"gaps": [], "ends_at_frame_border": True})
+    lost = dict(base, continuity={"gaps": [], "ends_at_frame_border": False})
+    assert of(gen([gapped]), "vehicle_leaves_scene")[0]["observations"]["end_reason"] == "missed_detection"
+    assert of(gen([bordered]), "vehicle_leaves_scene")[0]["observations"]["end_reason"] == "frame_border"
+    assert of(gen([lost]), "vehicle_leaves_scene")[0]["observations"]["end_reason"] == "missed_detection"
+    assert "not a confirmed exit" in of(gen([bordered]), "vehicle_leaves_scene")[0]["observations"]["note"]

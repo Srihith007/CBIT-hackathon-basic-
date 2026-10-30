@@ -19,6 +19,13 @@ def ingest_upload(session: Session, settings: Settings, *, case: Case, upload: U
         raise AppError(422, "INVALID_KIND", f"kind must be one of {sorted(ALLOWED)}")
     if case.status == "closed":
         raise AppError(409, "CASE_CLOSED", "Evidence cannot be added to a closed case")
+    if case.designation == "real" and synthetic:
+        raise AppError(
+            422, "SYNTHETIC_IN_REAL_CASE",
+            "This investigation is designated real. Evidence declared synthetic cannot be added to it. "
+            "The server checks the case designation against the declaration on this request; a control in the browser is not enough.",
+            {"designation": case.designation, "synthetic": True},
+        )
 
     limit = (settings.max_video_mb if kind in VIDEO_KINDS else settings.max_other_mb) * 1024 * 1024
     try:

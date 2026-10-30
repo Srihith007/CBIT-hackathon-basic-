@@ -10,11 +10,12 @@ import math
 
 import numpy as np
 
-VIDEO_EVENTS_VERSION = "1"
+VIDEO_EVENTS_VERSION = "2"
 DEFAULTS = {"moving_rel_speed": 0.5, "stopped_rel_speed": 0.15, "stop_min_s": 1.0, "slow_drop": 0.5, "slow_window_s": 0.8,
             "turn_deg": 30.0, "turn_window_s": 1.6, "min_turn_rel_speed": 0.3, "maneuver_min_path_diag": 3.0,
             "interaction_iou": 0.05, "interaction_gap_diag": 0.08, "near_miss_gap_diag": 0.5, "collision_drop": 0.6,
-            "collision_lookahead_s": 0.8, "cue_window_s": 0.5, "cue_min_conf": 0.4, "entry_margin_s": 0.5}
+            "collision_lookahead_s": 0.8, "cue_window_s": 0.5, "cue_min_conf": 0.4, "entry_margin_s": 0.5,
+            "segment_gap_factor": 1.5}
 
 
 def _diag(b) -> float:
@@ -68,6 +69,62 @@ def track_maneuver(points: list[dict], diag: float, p: dict) -> dict | None:
     return {"maneuver": kind, "net_heading_change_deg": round(change, 1), "path_length_diagonals": round(path / diag, 1)}
 
 
+def _end_note(track: dict) -> tuple[str, str]:
+    """Why a track stopped. A gap is a missed detection. The image border is a possible exit. Neither is fault."""
+    c = track.get("continuity") or {}
+    if c.get("gaps"):
+        return "missed_detection", "missed detection: sampled frames are missing inside the track, so the id may have been lost rather than the object leaving"
+    if c.get("ends_at_frame_border"):
+        return "frame_border", "track ends at the image border; the object may have left the frame. This is not a confirmed exit"
+    if c:
+        return "missed_detection", "track ended in open frame with no gap recorded; the detector stopped reporting this id (possible missed detection, not a confirmed exit)"
+    return "track_ended", "track ended; the object may have been lost rather than left"
+
+
+def _relation(max_iou: float, min_gap: float, p: dict) -> str:
+    """Overlap of the boxes is not the same thing as a small gap between them, and neither is physical contact."""
+    if max_iou >= p["interaction_iou"] or min_gap <= p["interaction_gap_diag"]:
+        return "box_overlap"
+    return "proximity"
+
+
+def _collapse_overlapping(events: list[dict], join_ms: float) -> list[dict]:
+    """One event per type and track set when the time spans meet. Separate types (slowing, stopped) stay separate."""
+    groups: list[dict] = []
+    for e in events:
+        key = (e["event_type"], tuple(sorted(e["observations"].get("track_ids") or [])))
+        hit = None
+        for g in groups:
+            if g["key"] == key and e["t_start_ms"] <= g["t_end"] + join_ms and g["t_start"] <= e["t_end_ms"] + join_ms:
+                hit = g
+                break
+        if hit is None:
+            groups.append({"key": key, "event": e, "t_start": e["t_start_ms"], "t_end": e["t_end_ms"]})
+            continue
+        hit["t_start"] = min(hit["t_start"], e["t_start_ms"])
+        hit["t_end"] = max(hit["t_end"], e["t_end_ms"])
+        base, extra = hit["event"], e
+        if (extra["observations"].get("max_box_overlap_iou") or 0) > (base["observations"].get("max_box_overlap_iou") or 0):
+            base["observations"]["max_box_overlap_iou"] = extra["observations"].get("max_box_overlap_iou")
+        if "min_gap_in_diagonals" in extra["observations"]:
+            prev = base["observations"].get("min_gap_in_diagonals")
+            gap = extra["observations"]["min_gap_in_diagonals"]
+            if prev is None or gap < prev:
+                base["observations"]["min_gap_in_diagonals"] = gap
+        frames = sorted(set((base["source_ref"].get("frames") or []) + (extra["source_ref"].get("frames") or [])))
+        times = sorted(set((base["source_ref"].get("frame_times_ms") or []) + (extra["source_ref"].get("frame_times_ms") or [])))
+        if frames:
+            base["source_ref"]["frames"] = [frames[0], frames[-1]]
+        if times:
+            base["source_ref"]["frame_times_ms"] = [times[0], times[-1]]
+    out = []
+    for g in groups:
+        e = g["event"]
+        e["t_start_ms"], e["t_end_ms"] = g["t_start"], g["t_end"]
+        out.append(e)
+    return out
+
+
 def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_ms: float, cues: list[tuple[float, float]] | None = None,
              overrides: dict | None = None) -> list[dict]:
     """tracks: [{track_id, class, points:[{frame_no,time_ms,bbox,anchor,confidence}]}] -> candidate events (source media time)."""
@@ -95,7 +152,9 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
         if pts[0]["time_ms"] > p["entry_margin_s"] * 1000:
             add("vehicle_enters_scene", "VID-ENTER-01", "machine_detection", pts[0], pts[0], tid, {"class": t["class"]}, [t])
         if pts[-1]["time_ms"] < video_duration_ms - p["entry_margin_s"] * 1000:
-            add("vehicle_leaves_scene", "VID-LEAVE-01", "machine_detection", pts[-1], pts[-1], tid, {"class": t["class"], "note": "track ended; the object may have been lost rather than left"}, [t])
+            reason, note = _end_note(t)
+            add("vehicle_leaves_scene", "VID-LEAVE-01", "machine_detection", pts[-1], pts[-1], tid,
+                {"class": t["class"], "end_reason": reason, "note": note}, [t])
         # slowing: mean speed after a window is far below the mean before it, starting from real movement
         w = max(2, int(round(p["slow_window_s"] * 1000 / period_ms)))
         i, last_end = w, -1
@@ -103,7 +162,9 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
             before, after = float(np.mean(sp[i - w:i])), float(np.mean(sp[i:i + w]))
             if before >= p["moving_rel_speed"] and after <= before * (1 - p["slow_drop"]) and i > last_end:
                 add("vehicle_slowing", "VID-SLOW-01", "machine_detection", pts[i - w], pts[i + w - 1], tid,
-                    {"relative_speed_before": round(before, 2), "relative_speed_after": round(after, 2), "drop": round(1 - after / before, 2), "unit": "box diagonals per second"}, [t])
+                    {"motion": "slowing", "relative_speed_before": round(before, 2), "relative_speed_after": round(after, 2),
+                     "drop": round(1 - after / before, 2), "unit": "box diagonals per second",
+                     "note": "speed dropped and the track is still moving; this is slowing, not a stop"}, [t])
                 last_end = i + w
                 i += w
             else:
@@ -116,7 +177,9 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
                 run = k
             elif not slow and run is not None:
                 if (pts[k - 1]["time_ms"] - pts[run]["time_ms"]) / 1000 >= p["stop_min_s"]:
-                    add("vehicle_stopped", "VID-STOP-01", "machine_detection", pts[run], pts[k - 1], tid, {"relative_speed": round(float(np.mean(sp[run:k])), 3)}, [t])
+                    add("vehicle_stopped", "VID-STOP-01", "machine_detection", pts[run], pts[k - 1], tid,
+                        {"motion": "stopped", "relative_speed": round(float(np.mean(sp[run:k])), 3),
+                         "note": "speed stayed near zero after the object had been moving; this is a stop, not only slowing"}, [t])
                 run = None
         # direction change
         span = max(1, int(round(p["turn_window_s"] * 1000 / period_ms / 2)))
@@ -171,7 +234,8 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
                     k += 1
                     continue
                 j = k
-                while j + 1 < len(common) and flags[j + 1] and common[j + 1] - common[j] <= 2:
+                join_ms = period_ms * p["segment_gap_factor"]
+                while j + 1 < len(common) and flags[j + 1] and fa[common[j + 1]]["time_ms"] - fa[common[j]]["time_ms"] <= join_ms:
                     j += 1
                 seg = near[k:j + 1]
                 pa0, pa1 = fa[seg[0][0]], fa[seg[-1][0]]
@@ -179,7 +243,8 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
                 min_gap = min(s[2] for s in seg)
                 touching = max_iou >= p["interaction_iou"] or min_gap <= p["interaction_gap_diag"]
                 tids = [a["track_id"], b["track_id"]]
-                obs = {"max_box_overlap_iou": round(max_iou, 3), "min_gap_in_diagonals": round(min_gap, 3),
+                relation = _relation(max_iou, min_gap, p)
+                obs = {"relation": relation, "max_box_overlap_iou": round(max_iou, 3), "min_gap_in_diagonals": round(min_gap, 3),
                        "note": "image-space proximity or box overlap is not physical contact or distance"}
                 add("potential_interaction", "VID-INTER-01", "machine_detection", pa0, pa1, tids, obs, [a, b])
                 # abrupt change of either party around the interaction => collision candidate or near-miss candidate
@@ -199,7 +264,8 @@ def generate(tracks: list[dict], *, kind: str, period_ms: float, video_duration_
                     cue_hits = [c for c in cues if t_a - p["cue_window_s"] * 1000 <= c[0] <= t_b + p["cue_window_s"] * 1000]
                     etype = "possible_collision" if touching else "possible_near_miss"
                     add(etype, "VID-COLL-01" if touching else "VID-NEAR-01", "machine_detection", pa0, pa1, tids,
-                        obs | {"abrupt_speed_changes": drops, "accident_cue_nearby": bool(cue_hits),
+                        obs | {"relation": "box_overlap" if touching else "proximity", "abrupt_speed_changes": drops,
+                               "accident_cue_nearby": bool(cue_hits),
                                "accident_cue_note": "the accident-cue model is a weak supporting signal and never decides this event"}, [a, b])
                 k = j + 1
-    return sorted(out, key=lambda e: (e["t_start_ms"], e["event_type"]))
+    return _collapse_overlapping(sorted(out, key=lambda e: (e["t_start_ms"], e["event_type"])), period_ms * p["segment_gap_factor"])

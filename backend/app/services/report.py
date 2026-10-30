@@ -121,6 +121,8 @@ def _strings(x):
 
 def validate(content: dict) -> dict:
     """Checks that must hold before a report is stored. A failed check is reported, never silently fixed."""
+    if content.get("format") == "investigator":
+        return _validate_investigator(content)
     checks = []
     def chk(name, ok, detail=""):
         checks.append({"check": name, "passed": bool(ok), "detail": detail if not ok else ""})
@@ -142,6 +144,8 @@ def validate(content: dict) -> dict:
 
 
 def to_markdown(content: dict) -> str:
+    if content.get("format") == "investigator":
+        return _investigator_markdown(content)
     out = []
     f = content["sections"][0]["facts"]
     out += [f"# Investigation report: {f['title']}", "", f"**{f['data_designation']}**", "", f"Case {f['case_code']} · scenario “{f['scenario']}” · generated {f['generated']}", ""]
@@ -205,3 +209,165 @@ def to_pdf(content: dict, path: Path) -> None:
         else:
             flow.append(Paragraph(clean, st["BodyText"]))
     doc.build(flow)
+
+
+INVESTIGATOR_SECTIONS = ["Executive summary", "Key timeline", "Findings", "Evidence appendix"]
+KEY_TYPES = ("possible_collision", "possible_near_miss", "vehicle_stopped", "vehicle_slowing", "vehicle_enters_scene",
+             "vehicle_leaves_scene", "vehicle_direction_change", "vehicle_maneuver_observed", "collision_flag", "hard_braking", "sensor_gap")
+_TIMELINE_CAP = 30
+_FINDING_TEXT = {
+    "possible_collision": "Possible collision candidates: image-space overlap plus an abrupt drop in box speed. This is not a determination that the vehicles touched, and it assigns no fault.",
+    "possible_near_miss": "Possible near-miss candidates: the boxes were close in the image and one track's box speed dropped. Closeness in the image is not a measured distance.",
+    "vehicle_slowing": "Slowing candidates: box speed dropped and the track was still moving. This is not a stop.",
+    "vehicle_stopped": "Stop candidates: box speed stayed near zero after the object had been moving. This is not only a brief slowing.",
+    "vehicle_enters_scene": "A track starts after the beginning of the video. That is an appearance in the image, not an identified vehicle entering a road.",
+    "vehicle_leaves_scene": "A track ends before the video ends. The stored end reason distinguishes a missed detection from a track that reaches the image border. Neither is a confirmed exit.",
+    "vehicle_direction_change": "Direction-change candidates are turns of the box path in the image, on a fixed camera.",
+    "vehicle_maneuver_observed": "Maneuver candidates describe the whole path of a track on a fixed camera. They are not a judgment of driving.",
+    "collision_flag": "A sensor row crossed the collision-flag rule. It is a sensor candidate, not a video contact.",
+    "hard_braking": "A sensor row crossed the hard-braking rule. It is not, by itself, a collision.",
+    "sensor_gap": "The sensor record has a gap. Times inside that gap are missing.",
+}
+
+
+def _validate_investigator(content: dict) -> dict:
+    checks = []
+
+    def chk(name, ok, detail=""):
+        checks.append({"check": name, "passed": bool(ok), "detail": detail if not ok else ""})
+
+    secs = content["sections"]
+    chk("four sections in order", [s["title"] for s in secs] == INVESTIGATOR_SECTIONS)
+    text = " ".join(_strings(content)).lower()
+    hits = [p for p in BANNED if re.search(p, text, re.I)]
+    chk("no language assigning fault or legal responsibility", not hits, f"matched: {hits}")
+    by = {s["title"]: s for s in secs}
+    chk("synthetic data is labelled", not content["synthetic"] or "SYNTHETIC" in by["Executive summary"].get("data_designation", ""))
+    stored = set(content.get("stored_event_ids") or [])
+    entries = by.get("Key timeline", {}).get("entries") or []
+    chk("every key-timeline entry names a stored event", all(e.get("event_id") in stored and e.get("source") for e in entries))
+    findings = by.get("Findings", {}).get("items") or []
+    chk("every finding cites stored events", all(f.get("event_ids") and set(f["event_ids"]) <= stored for f in findings))
+    chk("limits stated", "does not determine fault" in (by.get("Executive summary", {}).get("text") or ""))
+    chk("raw events were not deleted", content.get("stored_event_count") == len(stored))
+    return {"passed": all(c["passed"] for c in checks), "checks": checks}
+
+
+def build_investigator(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dict:
+    """Short report. Raw events stay in the database; this view cites them and does not copy every one."""
+    evs = list(db.execute(select(EvidenceFile).where(EvidenceFile.case_id == case.id).order_by(EvidenceFile.uploaded_at)).scalars())
+    label = {e.id: f"{e.kind} “{e.original_filename}”" for e in evs}
+    events = list(db.execute(select(Event).where(Event.scenario_id == scn.id)).scalars())
+    stored_ids = sorted(e.id for e in events)
+    cons = list(db.execute(select(Contradiction).where(Contradiction.scenario_id == scn.id)).scalars())
+    gaps = list(db.execute(select(GapRecord).where(GapRecord.scenario_id == scn.id)).scalars())
+    synthetic = any(e.synthetic for e in evs) or any(e.synthetic for e in events)
+    proximity = [e for e in events if e.event_type == "potential_interaction"]
+    key = [e for e in events if e.event_type in KEY_TYPES or e.category in ("witness_claim", "inference") or e.source_type == "sensor"]
+    key.sort(key=lambda e: (e.start_case_ms is None, e.start_case_ms or 0, e.id))
+
+    def entry(e: Event) -> dict:
+        return {"event_id": e.id, "source_event_id": (e.provenance or {}).get("source_event_id"), "title": e.title,
+                "event_type": e.event_type, "time_s": _ms(e.start_case_ms), "end_s": _ms(e.end_case_ms),
+                "uncertainty_s": _ms(e.uncertainty_ms) if e.start_case_ms is not None else None,
+                "source": label.get(e.source_id, e.source_type),
+                "note": (e.observations or {}).get("note") or (e.observations or {}).get("end_reason")}
+
+    shown, hidden = [], 0
+    per_type: dict[str, int] = {}
+    for e in key:
+        per_type[e.event_type] = per_type.get(e.event_type, 0) + 1
+        if per_type[e.event_type] <= _TIMELINE_CAP:
+            shown.append(entry(e))
+        else:
+            hidden += 1
+
+    findings = []
+    by_type: dict[str, list[Event]] = {}
+    for e in key:
+        by_type.setdefault(e.event_type, []).append(e)
+    for etype, rows in by_type.items():
+        statement = _FINDING_TEXT.get(etype)
+        if statement is None and rows[0].category == "witness_claim":
+            statement = "Witness claims are testimony. Listing them does not verify them."
+        elif statement is None and rows[0].category == "inference":
+            statement = "Inferences are possibilities. Each stored inference carries alternatives."
+        elif statement is None:
+            statement = "Machine detections of this type. They are candidates, not a determination."
+        unc = sorted({r.uncertainty_ms for r in rows if r.start_case_ms is not None})
+        findings.append({"statement": statement, "event_type": etype, "event_ids": [r.id for r in rows],
+                         "uncertainty_ms": unc, "count": len(rows)})
+    for c in cons:
+        findings.append({"statement": c.explanation_template, "event_type": "contradiction", "rule_id": c.rule_id,
+                         "event_ids": [c.event_a, c.event_b], "uncertainty_ms": [], "count": 2})
+
+    designation = ("SYNTHETIC DATA: every item in this report was generated for demonstration" if synthetic else "contains no synthetic data")
+    summary = (
+        f"{case.code} “{case.title}” is designated {case.designation}. "
+        f"{len(events)} events are stored on scenario “{scn.name}”. "
+        f"The key timeline lists {len(shown)} of them"
+        + (f" and leaves {hidden} further key events to the findings list." if hidden else ".")
+        + f" {len(proximity)} potential_interaction events are image-space proximity. They are not listed as findings and they were not deleted. "
+        "Image overlap is not physical contact or a measured distance. Video speeds are box-diagonals per second. "
+        + LIMITS
+    )
+    runs = list(db.execute(select(ModelRun).where(ModelRun.case_id == case.id).order_by(ModelRun.started_at)).scalars())
+    methods = []
+    seen = set()
+    for r in runs:
+        k = (r.stage, r.model_id, r.model_version)
+        if k in seen:
+            continue
+        seen.add(k)
+        methods.append({"stage": r.stage, "model": r.model_id, "version": r.model_version})
+    sections = [
+        {"number": 1, "title": "Executive summary", "text": summary, "data_designation": designation,
+         "counts": {"stored_events": len(events), "key_timeline": len(shown), "key_events_not_listed_inline": hidden,
+                    "proximity_events_kept_in_store": len(proximity), "findings": len(findings)},
+         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "prepared_by": who},
+        {"number": 2, "title": "Key timeline", "entries": shown,
+         "text": "Each row is one stored event. Proximity-only interactions are counted in the summary and omitted here."},
+        {"number": 3, "title": "Findings", "items": findings,
+         "text": "Every finding lists the stored event ids it rests on. An empty list means this scenario has no such finding."},
+        {"number": 4, "title": "Evidence appendix",
+         "items": [{"evidence_id": e.id, "kind": e.kind, "file": e.original_filename, "sha256": e.sha256, "synthetic": e.synthetic, "status": e.status} for e in evs],
+         "methods": methods,
+         "gaps": [{"id": g.id, "type": g.gap_type, "recommendation": g.recommendation} for g in gaps],
+         "text": "The full 16-section export is a separate report (format full). It lists every stored event. This appendix does not replace it."},
+    ]
+    return {"report_version": REPORT_VERSION, "format": "investigator", "case_id": case.id, "scenario_id": scn.id, "synthetic": synthetic,
+            "stored_event_ids": stored_ids, "stored_event_count": len(stored_ids), "sections": sections}
+
+
+def _investigator_markdown(content: dict) -> str:
+    sec = {s["title"]: s for s in content["sections"]}
+    summary, timeline, findings, appendix = (sec[t] for t in INVESTIGATOR_SECTIONS)
+    out = [f"# Investigator report: {content['case_id']}", "", f"**{summary['data_designation']}**", "", summary["text"], "",
+           f"Stored events: {summary['counts']['stored_events']}. Key timeline rows: {summary['counts']['key_timeline']}. "
+           f"Proximity events kept in the store and omitted here: {summary['counts']['proximity_events_kept_in_store']}.", "",
+           "## 1. Executive summary", "", summary["text"], "",
+           "## 2. Key timeline", "", timeline["text"], ""]
+    if not timeline["entries"]:
+        out += ["No key events are stored for this scenario.", ""]
+    for e in timeline["entries"]:
+        when = f"{e['time_s']:.2f} s ±{e['uncertainty_s']:.2f}" if e["time_s"] is not None else "no usable time"
+        out.append(f"- [{when}] {e['title']} — *{e['source']}* · event `{e['event_id']}`")
+    out += ["", "## 3. Findings", "", findings["text"], ""]
+    if not findings["items"]:
+        out += ["No findings.", ""]
+    for f in findings["items"]:
+        shown = f["event_ids"][:12]
+        more = len(f["event_ids"]) - len(shown)
+        ids = ", ".join(shown) + (f" (+{more} more stored ids in this finding)" if more else "")
+        out.append(f"- {f['statement']} ({f['count']}) · events: {ids}")
+    out += ["", "## 4. Evidence appendix", "", appendix["text"], ""]
+    if not appendix["items"]:
+        out += ["No evidence files stored.", ""]
+    for e in appendix["items"]:
+        out.append(f"- {e['kind']} `{e['file']}` · sha256 `{e['sha256'][:16]}…` · {'synthetic' if e['synthetic'] else 'not synthetic'}")
+    if appendix["gaps"]:
+        out += ["", "Gaps:"]
+        for g in appendix["gaps"]:
+            out.append(f"- {g['type']}: {g['recommendation']}")
+    out.append("")
+    return "\n".join(out)
