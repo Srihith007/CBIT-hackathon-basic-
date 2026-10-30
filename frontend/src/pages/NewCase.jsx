@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Shell from '../layout';
+import FilePicker from '../components/FilePicker';
 import { Alert, Badge, Button, Card, Field, Input, Select, Textarea } from '../ui-kit';
 import { api } from '../api';
 
@@ -60,16 +61,18 @@ export default function NewCase() {
           <Select value={designation} onChange={(e) => setDesignation(e.target.value)} disabled={busy}
                   options={[{ value: 'real', label: 'Real incident footage' }, { value: 'staged', label: 'Staged / recreated' }, { value: 'synthetic', label: 'Synthetic / generated' }]} />
         </Field>
-        <Field label="Videos" hint="Dashcam = moving camera, CCTV = fixed camera.">
-          <Input type="file" accept="video/*" multiple disabled={busy}
-                 onChange={(e) => setVideos([...e.target.files].map((file) => ({ file, name: file.name, kind: /dash/i.test(file.name) ? 'dashcam' : 'cctv' })))} />
+        <Field label="Videos" hint="Dashcam = moving camera, CCTV = fixed camera. The type is guessed from the file name; change it below.">
+          <FilePicker accept="video/*" multiple disabled={busy} label="Choose video files" hint="MP4, MOV or similar" files={videos.map((v) => v.file)}
+                      onChange={(fs) => setVideos(fs.map((file) => videos.find((v) => v.file === file) || { file, name: file.name, kind: /dash/i.test(file.name) ? 'dashcam' : 'cctv' }))} />
         </Field>
         {videos.map((v, i) => (
-          <div key={v.name} className="flex items-center gap-2"><span className="t-small flex-1 truncate">{v.name}</span>
+          <div key={`${v.name}-${i}`} className="flex items-center gap-2"><span className="t-small flex-1 truncate">{v.name}</span>
             <Select className="h-9" value={v.kind} disabled={busy} onChange={(e) => setVideos(videos.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}
                     options={[{ value: 'dashcam', label: 'Dashcam (moving)' }, { value: 'cctv', label: 'CCTV (fixed)' }]} /></div>
         ))}
-        <Field label="Sensor CSV" optional hint="You map its columns afterwards via the API."><Input type="file" accept=".csv" disabled={busy} onChange={(e) => setSensor(e.target.files[0] || null)} /></Field>
+        <Field label="Sensor CSV" optional hint="You map its columns afterwards via the API.">
+          <FilePicker accept=".csv" disabled={busy} label="Choose CSV file" hint="Optional" files={sensor ? [sensor] : []} onChange={(fs) => setSensor(fs[0] || null)} />
+        </Field>
         <Field label="Witness statement" optional><Textarea rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} disabled={busy} /></Field>
         <div className="flex items-center gap-3">
           <Button type="submit" variant="primary" loading={busy} disabled={!title || !videos.length}>{busy ? 'Working…' : 'Upload and analyse'}</Button>
