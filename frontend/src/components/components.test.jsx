@@ -12,8 +12,8 @@ vi.mock('../api', () => ({ api: { summary: vi.fn(), event: vi.fn(), cases: vi.fn
 import { api } from '../api';
 
 const wrap = (ui) => render(<ThemeProvider defaultTheme="dark" storageKey="t"><ToastProvider><MemoryRouter>{ui}</MemoryRouter></ToastProvider></ThemeProvider>);
-const ev = (id, cat, start, end, extra = {}) => ({ id, category: cat, event_type: 'x', title: `title ${id}`, start_ms: start, end_ms: end, uncertainty_ms: 100, source_type: 'video_cctv', ...extra });
-const tl = { span_ms: [1000, 6000], lanes: { cctv: [ev('a', 'machine_detection', 2000, 2000), ev('b', 'machine_detection', 4600, 4600)], witness: [ev('w', 'witness_claim', 3000, 4600, { source_type: 'witness' })] }, unplaced: [ev('u', 'witness_claim', null, null, { source_type: 'witness' })], marks: { b: { contradicted_by: ['c1'], corroborated_by: [] } }, unplaced_note: 'no time' };
+const ev = (id, cat, start, end, extra = {}) => ({ id, category: cat, event_type: 'possible_collision', title: `title ${id}`, start_ms: start, end_ms: end, uncertainty_ms: 100, source_type: 'video_cctv', ...extra });
+const tl = { span_ms: [1000, 6000], lanes: { cctv: [ev('a', 'machine_detection', 2000, 2000), ev('b', 'machine_detection', 4600, 4600), ev('n', 'machine_detection', 3500, 3500, { event_type: 'vehicle_enters_scene' })], witness: [ev('w', 'witness_claim', 3000, 4600, { source_type: 'witness' })] }, unplaced: [ev('u', 'witness_claim', null, null, { source_type: 'witness' })], marks: { b: { contradicted_by: ['c1'], corroborated_by: [] } }, unplaced_note: 'no time' };
 
 beforeEach(() => { useWorkspace.getState().reset('c', 's'); vi.clearAllMocks(); });
 
@@ -47,6 +47,22 @@ describe('timeline', () => {
     expect(screen.getByRole('button', { name: /title a/ })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText(/1 items have no usable time/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /title u, case/ })).toBeNull();
+  });
+  it('shows key events by default and every event on request', () => {
+    wrap(<Timeline tl={tl} gaps={[]} onSelect={vi.fn()} onSeek={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /title n, case/ })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /All events/ }));
+    expect(screen.getByRole('button', { name: /title n, case/ })).toBeInTheDocument();
+  });
+  it('highlights the events of the selected finding and dims the rest', () => {
+    useWorkspace.getState().setFinding('f', ['b'], { start: 4500, end: 4700 });
+    const { container } = wrap(<Timeline tl={tl} gaps={[]} onSelect={vi.fn()} onSeek={vi.fn()} />);
+    expect(container.querySelector('title')).toBeTruthy();
+    expect([...container.querySelectorAll('title')].some((t) => t.textContent === 'Selected finding interval')).toBe(true);
+    const a = screen.getByRole('button', { name: /title a, case/ }).querySelector('rect:last-child');
+    const b = screen.getByRole('button', { name: /title b, case/ }).querySelector('rect:last-child');
+    expect(a.getAttribute('opacity')).toBe('0.25');
+    expect(b.getAttribute('opacity')).toBe('1');
   });
   it('filters by category', () => {
     wrap(<Timeline tl={tl} gaps={[]} onSelect={vi.fn()} onSeek={vi.fn()} />);
@@ -102,5 +118,39 @@ describe('evidence drawers', () => {
     const { rerender } = render(el(true, e));
     await screen.findByText('Seek the player to this moment');
     expect(() => rerender(el(false, undefined))).not.toThrow();
+  });
+});
+
+import { FindingDetail } from './FindingParts';
+import Overview from './Overview';
+import { buildModel } from '../lib/overview';
+
+describe('finding structure', () => {
+  const f = { id: 'x', kind: 'contradiction', ruleId: 'CON-ACTION-01', classification: 'inferred', title: 'Camera does not match a witness account', summary: 'One sentence.', interval: { start: 1000, end: 1200, at: 1000 },
+    supporting: [{ eventId: 'm', label: 'video says straight', source: 'CCTV', classification: 'observed', time: 1000 }], contradicting: [{ eventId: 'w', label: 'witness says left', source: 'Witness', classification: 'reported', time: 900 }],
+    uncertainty: 'Different moment.', action: 'Check the moment.', review: { id: 'f1', review_status: 'unreviewed' }, technical: { text: 'raw rule text', ruleId: 'CON-ACTION-01', refs: ['m', 'w'], strength: 'clear' } };
+  it('shows title, sentence, classification, time, supporting, contradicting, uncertainty and action, with technical detail folded', () => {
+    wrap(<FindingDetail f={f} events={{ m: { id: 'm' }, w: { id: 'w' } }} onPick={vi.fn()} onOpenTrail={vi.fn()} onReview={vi.fn()} />);
+    expect(screen.getByText('Camera does not match a witness account')).toBeInTheDocument();
+    expect(screen.getByText('One sentence.')).toBeInTheDocument();
+    expect(screen.getByText('Inferred by rule')).toBeInTheDocument();
+    expect(screen.getByText('00:01.000 (case clock)')).toBeInTheDocument();
+    expect(screen.getByText('Supporting evidence')).toBeInTheDocument();
+    expect(screen.getByText('Contradicting evidence')).toBeInTheDocument();
+    expect(screen.getByText('Uncertainty and limits')).toBeInTheDocument();
+    expect(screen.getByText('Check the moment.')).toBeInTheDocument();
+    expect(screen.getByText('raw rule text').closest('details')).not.toHaveAttribute('open');
+  });
+  it('an unknown finding with no evidence says so instead of inventing support', () => {
+    wrap(<FindingDetail f={{ ...f, classification: 'unknown', supporting: [], contradicting: [], interval: null, review: null }} events={{}} onPick={vi.fn()} onOpenTrail={vi.fn()} />);
+    expect(screen.getByText(/There is no evidence for this: that is the finding./)).toBeInTheDocument();
+    expect(screen.getByText(/no time on the shared clock/)).toBeInTheDocument();
+  });
+  it('the overview labels imported boxes and shows nothing when there is nothing', () => {
+    const m = buildModel({ evidence: [{ id: 'v', kind: 'cctv' }], actors: [], modelRuns: { v: [{ id: 'r', stage: 'detect', model_id: 'oracle:synthetic-world', status: 'completed', started_at: '2026-01-01', metrics: { boxes: 5 } }] } });
+    wrap(<Overview model={m} designation="synthetic" onSelectFinding={vi.fn()} onSeeAll={vi.fn()} />);
+    expect(screen.getByText('Imported boxes, not detector output')).toBeInTheDocument();
+    expect(screen.getByText('No significant findings were produced from the current data.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing is flagged for immediate review.')).toBeInTheDocument();
   });
 });
