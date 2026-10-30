@@ -1,3 +1,4 @@
+import FilePicker from './FilePicker';
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Field, Input, Textarea } from '../ui-kit';
 import { api } from '../api';
@@ -23,7 +24,7 @@ export default function EvidenceUploader({ caseId, designation, onDone, submitLa
     const picked = [...list];
     const seen = new Set();
     const next = picked.filter((f) => { const k = `${f.name}:${f.size}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    setFiles(next.map((file) => ({ key: `${file.name}:${file.size}`, file, meta: { ...EMPTY_META, camera_kind: guessKind(file.name) } })));
+    setFiles((old) => next.map((file) => old.find((o) => o.key === `${file.name}:${file.size}`) || { key: `${file.name}:${file.size}`, file, meta: { ...EMPTY_META, camera_kind: guessKind(file.name) } }));
     setErrors({});
   };
   const setMeta = (key) => (meta) => setFiles((l) => l.map((f) => (f.key === key ? { ...f, meta } : f)));
@@ -66,7 +67,7 @@ export default function EvidenceUploader({ caseId, designation, onDone, submitLa
   return (
     <form onSubmit={submit} className="space-y-4" aria-label="Upload evidence">
       <Field label="Videos" hint="Several files can be added. Dashcam = moving camera, CCTV = fixed camera. Each file keeps its own clock until you state how they relate.">
-        <Input type="file" accept="video/*" multiple disabled={busy} onChange={(e) => choose(e.target.files)} />
+        <FilePicker accept="video/*" multiple disabled={busy} label="Choose video files" hint="MP4, MOV or similar" files={files.map((f) => f.file)} onChange={choose} />
       </Field>
       {files.map((f, i) => (
         <Card key={f.key} padded={false} className="space-y-3 p-4" aria-label={`Source ${f.file.name}`}>
@@ -74,7 +75,7 @@ export default function EvidenceUploader({ caseId, designation, onDone, submitLa
           <SourceMetaFields value={f.meta} onChange={setMeta(f.key)} errors={errors[f.key]} disabled={busy} idPrefix={`up-${i}`} filename={f.file.name} />
         </Card>
       ))}
-      <Field label="Sensor CSV" optional hint="After upload, map its columns and units on the Evidence page. Until then no sensor reading is used."><Input type="file" accept=".csv" disabled={busy} onChange={(e) => setSensor(e.target.files[0] || null)} /></Field>
+      <Field label="Sensor CSV" optional hint="After upload, map its columns and units on the Evidence page. Until then no sensor reading is used."><FilePicker accept=".csv" disabled={busy} label="Choose CSV file" hint="Optional" files={sensor ? [sensor] : []} onChange={(fs) => setSensor(fs[0] || null)} /></Field>
       <Field label="Witness statement" optional><Textarea rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} disabled={busy} /></Field>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" variant="primary" loading={busy} disabled={!files.length && !sensor && !statement.trim()}>{busy ? 'Uploading…' : submitLabel}</Button>
