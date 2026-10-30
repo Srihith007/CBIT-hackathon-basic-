@@ -161,6 +161,7 @@ export default function Timeline({ tl, gaps = [], onSelect, onSeek, compact = fa
           </svg>
         )}
       </div>
+      {lanes.length === 0 && <p className="t-small mt-2 text-fg-3" role="status">{Object.values(tl.lanes).flat().length ? 'No events match the current filter. Switch to All events.' : 'No events were produced for this case, so there is nothing to place on the timeline.'}</p>}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="t-caption text-fg-3">Case clock (reference source = 0). Ruler step {step >= 1000 ? `${step / 1000} s` : `${step} ms`}. Click an empty area to seek; Ctrl/⌘ + wheel zooms.</span>
         <span className="t-caption inline-flex items-center gap-1 text-fg-3"><i className="inline-block h-2 w-3 rounded-sm bg-danger/60" />contradicted</span>

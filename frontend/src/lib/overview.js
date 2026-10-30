@@ -5,7 +5,7 @@ import { formatTime } from './time';
 
 export const SIGNIFICANT = new Set([
   'possible_collision', 'possible_near_miss', 'collision_flag', 'acceleration_spike', 'hard_braking', 'vehicle_slowing', 'vehicle_stopped',
-  'vehicle_direction_change', 'vehicle_maneuver_observed', 'potential_interaction', 'possible_braking_before_impact', 'vehicle_braked',
+  'vehicle_direction_change', 'vehicle_maneuver_observed', 'possible_braking_before_impact', 'vehicle_braked',
   'vehicle_turned', 'vehicle_went_straight', 'collision_claim', 'vehicle_speed_claim', 'vehicle_stopped_claim', 'sensor_gap',
 ]);
 export const isSignificant = (e) => SIGNIFICANT.has(e.event_type);
@@ -46,7 +46,9 @@ export function buildModel({ events = [], unplaced = [], cons = [], crbs = [], g
   const who = (e) => (e?.actor_id && actor[e.actor_id]) || 'a tracked road user';
   const names = (e) => {
     const ids = [...new Set([...(e?.observations?.actors || []), e?.actor_id].filter(Boolean))];
-    return ids.length ? ids.map((i) => actor[i] || 'a road user').join(' and ') : 'tracked road users';
+    if (ids.length) return ids.map((i) => actor[i] || 'a road user').join(' and ');
+    const tr = e?.observations?.track_ids;
+    return tr?.length ? `tracks ${tr.map((t) => `#${t}`).join(' and ')} (identity not confirmed)` : 'tracked road users';
   };
   const reviewOf = (refId) => finds.find((f) => f.ref_ids?.includes(refId));
   const ref = (e, role) => ({ eventId: e.id, label: e.title, source: sourceName(e), classification: classOfEvent(e), time: e.start_ms, role });
@@ -103,14 +105,27 @@ export function buildModel({ events = [], unplaced = [], cons = [], crbs = [], g
     id: `inf:${e.id}`, kind: 'inference', ruleId: e.inference?.rule_id, classification: 'inferred', priority: 80, title: 'Braking may have started before the possible impact', summary: e.inference?.statement || e.title,
     supporting: (e.inference?.premises || []).map((i) => ev[i]).filter(Boolean).map((p) => ref(p, 'premise')), interval: interval([e]), actorIds: [e.actor_id].filter(Boolean),
     uncertainty: `Alternatives: ${(e.inference?.alternatives || []).join('; ')}.`, action: 'Treat as a possibility, not a fact.', review: reviewOf(e.id), technical: { text: e.inference?.statement, ruleId: e.inference?.rule_id, refs: e.inference?.premises || [] } }));
-  all.filter((e) => ['possible_collision', 'possible_near_miss'].includes(e.event_type) && !covered.has(e.id)).forEach((e) => {
-    const abrupt = e.observations?.abrupt_speed_changes?.length;
-    const coll = e.event_type === 'possible_collision';
-    add({ id: `evt:${e.id}`, kind: 'event', ruleId: e.provenance?.rule_id, classification: 'observed', priority: coll ? 70 : 55, title: coll ? 'Possible vehicle contact in the video' : 'Possible near miss in the video',
-      summary: coll ? `The tracked paths of ${names(e)} overlap in the image${abrupt ? ' and movement changes suddenly' : ''} ${about(e.start_ms)}. The image alone cannot confirm physical contact.`
-        : `${names(e)} come close in the image ${about(e.start_ms)} without a clear overlap.`,
-      supporting: [ref(e, 'support')], interval: interval([e]), actorIds: [e.actor_id].filter(Boolean), uncertainty: 'Detected by rule from image-space boxes; not confirmed by a second independent source.',
-      action: 'Review the video frames around this moment.', technical: { text: e.title, ruleId: e.provenance?.rule_id, refs: [e.id] } });
+  const GROUP_AT = 4; // more candidates than this of one type are summarised as one finding; every event stays in the Technical list
+  ['possible_collision', 'possible_near_miss'].forEach((type) => {
+    const list = all.filter((e) => e.event_type === type && !covered.has(e.id)).sort((a, b) => (a.start_ms ?? 1e12) - (b.start_ms ?? 1e12));
+    const coll = type === 'possible_collision';
+    if (list.length === 0) return;
+    const one = (e) => {
+      const abrupt = e.observations?.abrupt_speed_changes?.length;
+      add({ id: `evt:${e.id}`, kind: 'event', ruleId: e.provenance?.rule_id, classification: 'observed', priority: coll ? 70 : 55, title: coll ? 'Possible vehicle contact in the video' : 'Possible near miss in the video',
+        summary: coll ? `The paths of ${names(e)} overlap in the image${abrupt ? ' and movement changes suddenly' : ''} ${about(e.start_ms)}. The image alone cannot confirm physical contact.`
+          : `${names(e)} come close in the image ${about(e.start_ms)} without a clear overlap.`,
+        supporting: [ref(e, 'support')], interval: interval([e]), actorIds: [e.actor_id].filter(Boolean), uncertainty: 'Detected by rule from image-space boxes; not confirmed by a second independent source.',
+        action: 'Review the video frames around this moment.', technical: { text: e.title, ruleId: e.provenance?.rule_id, refs: [e.id] } });
+    };
+    if (list.length < GROUP_AT) { list.forEach(one); return; }
+    const placed = list.filter((e) => e.start_ms != null);
+    add({ id: `evtgrp:${type}`, kind: 'event', ruleId: list[0].provenance?.rule_id, classification: 'observed', priority: coll ? 70 : 55,
+      title: coll ? `${list.length} possible vehicle contacts were flagged in the video` : `${list.length} possible near misses were flagged in the video`,
+      summary: `${coll ? 'Overlapping boxes with a sudden movement change' : 'Boxes that come close'} were flagged ${list.length} times${placed.length ? `, first ${about(placed[0].start_ms)} and last ${about(placed[placed.length - 1].start_ms)}` : ''}. In a busy scene many of these are the same pair seen over several frames or boxes that overlap without contact, so none is treated as established.`,
+      supporting: list.slice(0, 8).map((e) => ref(e, 'support')), interval: interval(placed), actorIds: [],
+      uncertainty: `Showing the first 8 of ${list.length}; all are listed under Technical. Detected by rule from image-space boxes, with no independent second source.`,
+      action: 'Review the footage around the earliest candidates and decide which, if any, show real contact.', technical: { text: `${list.length} events of type ${type}`, ruleId: list[0].provenance?.rule_id, refs: list.map((e) => e.id) } });
   });
 
   // ---- gaps and open questions (unknown)
@@ -157,7 +172,9 @@ export function buildModel({ events = [], unplaced = [], cons = [], crbs = [], g
   else if (lead) {
     const both = crbs.some((c) => c.rule_id === 'COR-COLL-01' && c.events.includes(lead.id));
     const src = both ? 'Both the camera and a vehicle sensor point to this moment.' : lead.source_type === 'sensor' ? 'Only a vehicle sensor points to this moment.' : 'Only the camera analysis points to this moment.';
-    headline = `A possible collision involving ${names(lead)} is indicated ${about(lead.start_ms)}. ${src}${nCon ? ` ${nCon} source conflict${nCon > 1 ? 's' : ''} need${nCon > 1 ? '' : 's'} review.` : ''} Physical contact is not confirmed.`;
+    const nColl = cands.filter((e) => e.event_type === 'possible_collision').length;
+    headline = nColl > 3 && !both ? `The video analysis flagged ${nColl} possible-collision candidates, the first ${about(lead.start_ms)}. They come from overlapping boxes only, so on a busy scene most may be false alarms; none is confirmed.${nCon ? ` ${nCon} source conflict${nCon > 1 ? 's' : ''} need${nCon > 1 ? '' : 's'} review.` : ''}`
+      : `A possible collision involving ${names(lead)} is indicated ${about(lead.start_ms)}. ${src}${nCon ? ` ${nCon} source conflict${nCon > 1 ? 's' : ''} need${nCon > 1 ? '' : 's'} review.` : ''} Physical contact is not confirmed.`;
   } else if (near.length) headline = `A possible near miss involving ${names(near[0])} is indicated ${about(near[0].start_ms)}. No contact was identified.${nCon ? ` ${nCon} source conflict${nCon > 1 ? 's' : ''} need${nCon > 1 ? '' : 's'} review.` : ''}`;
   else if (!tracked && !all.some((e) => e.source_type === 'sensor')) headline = analysis.detection === 'none' ? 'No detections are stored for the video yet, so nothing can be said about movement or contact.' : 'Video analysis has not produced any tracked road users for this case, so nothing can be said about movement or contact.';
   else headline = 'No collision or near miss was identified in the analysed evidence.';
@@ -197,3 +214,13 @@ export const ANALYSIS_LABEL = {
   'no-video': 'No video in this case',
 };
 export { formatTime };
+
+/** The case's declared designation can disagree with its evidence (the backend accepts synthetic files in a real case and keeps `designation`).
+ *  Returns the designation to display and, when they disagree, a plain explanation. Synthetic data must never pass as real. */
+export function effectiveDesignation(designation, evidence = []) {
+  const flagged = evidence.filter((e) => e.synthetic);
+  const real = evidence.filter((e) => !e.synthetic);
+  if (designation !== 'synthetic' && designation !== 'mixed' && flagged.length > 0) return { value: 'mixed', warning: `This case is declared ${designation}, but ${evidence.length === 1 ? 'its evidence file is' : `${flagged.length} of its ${evidence.length} evidence files ${flagged.length > 1 ? 'are' : 'is'}`} marked synthetic (${flagged.map((e) => e.original_filename).join(', ')}). Treat its findings as not purely real.` };
+  if (designation === 'synthetic' && real.length > 0) return { value: 'mixed', warning: `This case is declared synthetic, but ${real.length} evidence file${real.length > 1 ? 's' : ''} ${real.length > 1 ? 'are' : 'is'} not marked synthetic (${real.map((e) => e.original_filename).join(', ')}).` };
+  return { value: designation, warning: null };
+}
