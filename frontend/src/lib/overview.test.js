@@ -79,4 +79,41 @@ describe('overview never says more than the records support', () => {
     const text = JSON.stringify([m.overview.headline, m.findings.map((f) => [f.title, f.summary, f.uncertainty])]);
     expect(text).not.toMatch(/%|probab|likel|confidence score/i);
   });
+  it('a busy real scene: many uncorroborated candidates become one finding, not dozens, and the headline does not pick one as the incident', () => {
+    const cands = Array.from({ length: 12 }, (_, i) => E(`c${i}`, { event_type: 'possible_collision', start_ms: 4000 + i * 200, observations: { track_ids: [3, 4], abrupt_speed_changes: [{}] } }));
+    const noise = Array.from({ length: 300 }, (_, i) => E(`p${i}`, { event_type: 'potential_interaction', start_ms: i * 40 }));
+    const m = buildModel({ ...base, events: [...cands, ...noise] });
+    const grouped = m.findings.filter((f) => f.kind === 'event');
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].title).toBe('12 possible vehicle contacts were flagged in the video');
+    expect(grouped[0].supporting).toHaveLength(8);
+    expect(grouped[0].technical.refs).toHaveLength(12);
+    expect(m.overview.headline).toMatch(/flagged 12 possible-collision candidates/);
+    expect(m.overview.headline).toMatch(/none is confirmed/);
+    expect(m.overview.stats.significant).toBe(12); // potential_interaction is not a key event
+  });
+  it('few candidates keep their own findings and name tracks, not invented vehicles, when identity is unconfirmed', () => {
+    const c = E('c1', { event_type: 'possible_collision', start_ms: 4800, observations: { track_ids: [3, 7] } });
+    const m = buildModel({ ...base, events: [c] });
+    expect(m.overview.headline).toContain('tracks #3 and #7 (identity not confirmed)');
+    expect(m.findings).toHaveLength(1);
+  });
+});
+
+import { effectiveDesignation } from './overview';
+describe('real and synthetic never mix silently', () => {
+  const ev = (name, synthetic) => ({ original_filename: name, synthetic });
+  it('a real case containing a synthetic file is shown as mixed with the file named', () => {
+    const r = effectiveDesignation('real', [ev('crash.mp4', false), ev('demo.mp4', true)]);
+    expect(r.value).toBe('mixed');
+    expect(r.warning).toMatch(/declared real, but 1 of its 2 evidence files is marked synthetic \(demo\.mp4\)/);
+  });
+  it('a synthetic case containing a non-synthetic file is also flagged', () => {
+    expect(effectiveDesignation('synthetic', [ev('a', true), ev('b', false)]).value).toBe('mixed');
+  });
+  it('consistent cases are untouched', () => {
+    expect(effectiveDesignation('real', [ev('a', false)])).toEqual({ value: 'real', warning: null });
+    expect(effectiveDesignation('synthetic', [ev('a', true)])).toEqual({ value: 'synthetic', warning: null });
+    expect(effectiveDesignation('staged', [])).toEqual({ value: 'staged', warning: null });
+  });
 });

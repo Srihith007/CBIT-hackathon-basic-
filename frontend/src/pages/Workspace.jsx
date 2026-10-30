@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, Checkbox, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
+import { Alert, Badge, Button, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
 import { FileText, Film, Gauge, PanelLeftClose, PanelLeftOpen, Users } from 'lucide-react';
 import Shell from '../layout';
 import { api } from '../api';
@@ -8,7 +8,7 @@ import { useWorkspace } from '../store';
 import { byStart, findActiveEvent, resolveActive } from '../lib/active';
 import { ACTOR_COLORS, CATEGORY_STYLE } from '../fmt';
 import { formatTime } from '../lib/time';
-import { ANALYSIS_LABEL, buildModel, isSignificant } from '../lib/overview';
+import { ANALYSIS_LABEL, buildModel, effectiveDesignation, isSignificant } from '../lib/overview';
 import DesignationBadge from '../components/DesignationBadge';
 import Panel from '../components/Panel';
 import Player from '../components/Player';
@@ -35,7 +35,6 @@ export default function Workspace() {
   const [scenarioId, setScenarioId] = useState(null);
   const [trail, setTrail] = useState(null);
   const [navOpen, setNavOpen] = useState(readNav);
-  const overlays = useWorkspace((s) => s.overlays);
   const selectedActor = useWorkspace((s) => s.selectedActorId);
   const activeId = useWorkspace((s) => s.activeEventId);
   const primaryId = useWorkspace((s) => s.primaryVideoId);
@@ -127,6 +126,7 @@ export default function Workspace() {
   if (err) return <Shell crumbs={crumbs}><ErrorState title={err.code === 'CASE_NOT_FOUND' ? 'This case does not exist' : 'Could not load the case'} description={err.message} onRetry={() => load()} /></Shell>;
   if (!data) return <Shell crumbs={crumbs} wide><LoadingState rows={6} label="Loading workspace" /></Shell>;
   const { c } = data;
+  const eff = effectiveDesignation(c.designation, data.ev);
   const trailEvidence = trail && data.ev.find((e) => e.id === trail.ev.source_id);
   const selected = model && findingId ? model.byId[findingId] : null;
   const reviewed = (data.finds || []).filter((f) => f.review_status === 'reviewed').length;
@@ -179,7 +179,7 @@ export default function Workspace() {
       <div className="mb-3 flex flex-wrap items-center gap-3">
         {!navOpen && <IconButton icon={PanelLeftOpen} label="Show navigation" variant="outline" size="sm" onClick={toggleNav} />}
         <h1 className="text-xl font-semibold">{c.title}</h1>
-        <DesignationBadge designation={c.designation} />
+        <DesignationBadge designation={eff.value} />
         <span className="mono t-caption text-fg-3">{c.code}</span>
         {scenarios.length > 1 && (
           <label className="t-caption ml-auto flex items-center gap-2 text-fg-3">Scenario
@@ -187,6 +187,7 @@ export default function Workspace() {
           </label>
         )}
       </div>
+      {eff.warning && <Alert variant="danger" className="mb-3" title="Real and synthetic evidence are mixed in this case">{eff.warning}</Alert>}
       {c.designation === 'synthetic' && <Alert variant="warning" className="mb-3" title="Synthetic demonstration data">Every source in this case was generated. Findings describe the system's logic on a synthetic world, not a real incident.</Alert>}
 
       {data.none ? (
@@ -196,23 +197,19 @@ export default function Workspace() {
           <div className={`grid grid-cols-[minmax(0,1fr)] gap-4 ${navOpen ? 'xl:grid-cols-[250px_minmax(0,1fr)_420px]' : 'xl:grid-cols-[minmax(0,1fr)_420px]'}`}>
             <div className="order-1 min-w-0 space-y-4 xl:order-2">
               <Panel as="section" className="p-3" aria-label="Evidence video">
-                <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={pick} />
-                <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pt-3">
-                  <Checkbox label="Boxes" checked={overlays.boxes} onChange={() => useWorkspace.getState().toggleOverlay('boxes')} />
-                  <Checkbox label="Track labels" checked={overlays.ids} onChange={() => useWorkspace.getState().toggleOverlay('ids')} />
-                  <span className="t-caption ml-auto text-fg-3">Boxes are stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Label percentages are the detector's score for that box, not the chance of an event. Nothing is drawn between samples.</span>
-                </div>
+                <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
+                <p className="t-caption mt-2 text-fg-3" title="Percentages on boxes are the detector's score for that box, not the chance of an event. Nothing is drawn between sampled frames.">Stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Hover for what box labels mean.</p>
               </Panel>
               <Panel as="section" className="p-3" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${keyEvents.length} key events of ${events.length} placed · ${data.tl.unplaced.length} without a usable time · times on the case clock`} className="!mb-3" />
-                <Timeline tl={data.tl} gaps={data.gaps} onSelect={(e) => { pick(e); }} onSeek={seekTo} />
+                <Timeline tl={data.tl} gaps={data.gaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
               </Panel>
             </div>
 
             <Panel as="aside" className="order-2 h-fit min-w-0 p-4 xl:sticky xl:top-20 xl:order-3" aria-label="Inspector">
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
-                {tab === 'overview' && <Overview model={model} designation={c.designation} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} />}
+                {tab === 'overview' && <Overview model={model} designation={eff.value} activeId={activeId} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />
                   : model.findings.length === 0 ? <p className="t-small text-fg-3">No findings were produced for this reconstruction.</p>

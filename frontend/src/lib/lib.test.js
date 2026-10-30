@@ -80,6 +80,13 @@ describe('overlay coordinate mapping', () => {
     expect(tf.ox).toBe(320);
     expect(tf.oy).toBe(0);
   });
+  it('non-square pixels: boxes in the coded 1280x720 grid land on the 1280x723 displayed picture', () => {
+    const tf = containTransform(1280, 723, 1280, 723, 1280, 720);
+    const r = mapBox([100, 360, 200, 720], tf);
+    expect(r.y).toBeCloseTo(360 * (723 / 720), 5);
+    expect(r.y + r.h).toBeCloseTo(723, 5); // the bottom edge of the frame is the bottom of the picture
+    expect(r.x).toBeCloseTo(100, 5);
+  });
   it('draws only a recent sample and never interpolates', () => {
     const items = [{ time_ms: 0 }, { time_ms: 200 }, { time_ms: 400 }];
     expect(latestSample(items, 250).time_ms).toBe(200);
