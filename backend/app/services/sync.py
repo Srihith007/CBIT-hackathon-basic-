@@ -54,7 +54,7 @@ def solve(evidence: list[dict], clocks: list[dict], edges: list[dict], reference
     groups, inconsistencies = [], []
     order = sorted(ids, key=lambda i: (KIND_ORDER.get(ids[i]["kind"], 9), i))
     for start in order:
-        if start in seen or not adj[start]:
+        if start in seen or (not adj[start] and len(ids) > 1):  # a lone source is its own reference clock; among several it stays unrelated
             continue
         comp = []
         dq = deque([start])

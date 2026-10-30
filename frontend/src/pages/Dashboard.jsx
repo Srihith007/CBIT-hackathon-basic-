@@ -17,7 +17,7 @@ export default function Dashboard() {
           <Link to="/" className="t-caption text-fg-3">← TraceLine</Link>
           <h1 className="mt-1 text-2xl font-semibold">Investigations</h1>
         </div>
-        <Badge variant="warning">Investigation support · no fault determination</Badge>
+        <div className="flex items-center gap-3"><Badge variant="warning">Investigation support · no fault determination</Badge><Link to="/new" className="btn btn-sm">New investigation</Link></div>
       </header>
       {err && <ErrorState title="The API did not answer" description={`${err}. Start it with: uvicorn app.main:app --port 8000`} />}
       {!err && !d && <LoadingState label="Loading" />}

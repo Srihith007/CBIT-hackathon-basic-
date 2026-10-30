@@ -149,3 +149,11 @@ def test_api_proposals_need_confirmation(client, sample_video):
     c = client.post(f"/api/v1/sync-edges/{p[0]['id']}/confirm").json()
     assert c["status"] == "verified" and client.get(f"/api/v1/cases/{case['id']}/sync").json()["groups"]
     assert client.post("/api/v1/sync-edges/sed_nope/confirm").status_code == 404
+
+
+def test_a_lone_source_is_its_own_reference_clock():
+    from app.services import sync
+    r = sync.solve([{"id": "v1", "kind": "cctv"}], [], [])
+    assert r["unsynchronized"] == [] and r["groups"][0]["members"][0]["offset_to_reference_ms"] == 0
+    two = sync.solve([{"id": "v1", "kind": "cctv"}, {"id": "v2", "kind": "dashcam"}], [], [])
+    assert two["groups"] == [] and two["unsynchronized"] == ["v1", "v2"]

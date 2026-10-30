@@ -47,6 +47,18 @@ export const api = {
   report: (id, scenario) => req(`/cases/${id}/reports`, { method: 'POST', body: JSON.stringify({ scenario_id: scenario || null }) }),
   reports: (id) => req(`/cases/${id}/reports`),
   reportMd: (rid) => req(`/reports/${rid}/markdown`),
+  createCase: (body) => req('/cases', { method: 'POST', body: JSON.stringify(body) }),
+  upload: async (caseId, file, kind, synthetic) => {
+    const fd = new FormData();
+    fd.append('file', file); fd.append('kind', kind); fd.append('synthetic', String(synthetic));
+    const res = await fetch(`${BASE}/cases/${caseId}/evidence`, { method: 'POST', body: fd, headers: { 'X-Actor': 'investigator' } });
+    const body = await res.json();
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body;
+  },
+  jobs: (id) => req(`/cases/${id}/jobs`),
+  addWitness: (id, label) => req(`/cases/${id}/witnesses`, { method: 'POST', body: JSON.stringify({ label }) }),
+  addStatement: (wid, text, synthetic) => req(`/witnesses/${wid}/statements`, { method: 'POST', body: JSON.stringify({ text, synthetic }) }),
   streamUrl: (evId) => `${BASE}/evidence/${evId}/stream`,
   pdfUrl: (rid) => `${BASE}/reports/${rid}/pdf`,
 };
