@@ -136,8 +136,8 @@ The merged workspace is one route. There is no second multi-angle page and no ev
 | Sensor panel | Partial. Closed inside Technical detail. Renders only when a `sensor_csv` evidence row exists. |
 | Camera filter | Partial. The nav rail can set the primary video. It is not a reconstruction filter that drops other sources' events. |
 | Trajectories off the default view | Implemented. Closed `<details>` labeled Technical detail. Unit test checks it is closed and that no `aria-label="Trajectories"` panel is on the page. |
-| Before / during / after | Not implemented. |
-| Storyboard | Not implemented. |
+| Before / during / after | Backend read `GET /cases/{id}/storyboard` cites stored frames around each video event. It does not generate an image. The page that shows those stills is frontend work. |
+| Storyboard | Same read. One strip per camera, in that file's media order. Cameras are not interleaved. |
 | Reconstruction scenario switcher | Partial. A scenario `<select>` appears only when the case has more than one scenario. |
 | Technical inspector | Implemented from the merged audit UI (overview, findings, evidence, technical). Findings text is built from stored records in `overview.js`. |
 
@@ -156,7 +156,7 @@ The merged workspace is one route. There is no second multi-angle page and no ev
 
 | Capability | Class |
 |---|---|
-| Backend pytest suite | Re-run from `backend/` after the scenario module: 246 passed, 19 skipped, 0 failed. The extra skips are browser seeking and timeline-video sync. The other 17 are the scenario packages and the accident-cue image split. `test_selected_accident_video_is_detected_tracked_and_reviewed` ran; the selected file was present. Synthetic scenario passes are not that result. |
+| Backend pytest suite | Re-run from `backend/` after the case-field follow-up: 251 passed, 19 skipped, 0 failed. Skips are browser seeking, timeline-video sync, the scenario packages, and the accident-cue image split. `test_selected_accident_video_is_detected_tracked_and_reviewed` ran; the selected file was present. Synthetic scenario passes are not that result. |
 | Frontend vitest, 55 tests | Implemented and verified on this merge before the merge commit. |
 | The 24 V2 scenarios and 15 multi-camera scenarios | Backend fixtures are in `backend/tests/test_v2_scenarios.py`. They are synthetic. Real footage is only `test_real_video_pipeline.py`. Browser seeking and timeline-video sync are skipped for the frontend worker. |
 | Screenshots at 1366×768, 1440×900, and 1920×1080 for five pages, the guided flow, and complete versus incomplete cases | Not implemented for V2. Older Chrome shots exist: pipeline timeline shots described in `docs/FINAL_FRONTEND_AUDIT.md` Record A, and `docs/frontend/screenshots/` from `claude/final-audit` (Record B). Neither set is a V2 five-page pass. |
@@ -164,4 +164,4 @@ The merged workspace is one route. There is no second multi-angle page and no ev
 
 ## What later phases still have to build
 
-The frontend shell, before/during/after, storyboard, and browser scenario checks are still open. Backend source metadata, clocks, uncertain associations, evidence-class names, Featherless citation checks, and the backend docs named above are in this branch. Named backend scenarios are synthetic fixtures in `backend/tests/test_v2_scenarios.py`. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.
+The frontend shell and browser scenario checks are still open. The storyboard read returns stored frame references; the page that displays them is frontend work. Backend source metadata, clocks, uncertain associations, evidence-class names, Featherless citation checks, and the backend docs named above are in this branch. Named backend scenarios are synthetic fixtures in `backend/tests/test_v2_scenarios.py`. Unsupported items stay written here. They are not filled with placeholder findings, cameras, times, plates, or make and model.

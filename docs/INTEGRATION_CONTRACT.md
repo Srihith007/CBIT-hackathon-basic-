@@ -42,11 +42,14 @@ HTTP statuses used: 400, 403, 404, 409, 422, 500, 503. Codes the frontend relies
 | status | string | no | `open`\|`processing`\|`review`\|`closed` | system |
 | designation | string | no | `real`\|`staged`\|`synthetic`\|`mixed`. Real and synthetic cases are separate cases. | reported |
 | allow_external_inference | bool | no | if false no content leaves the machine | reported |
+| incident_at | string | **yes** | ISO-8601 with a timezone offset. Investigator-stated instant. Not read from a file and not used to choose frames. A value without an offset is 422 `INCIDENT_TIMEZONE_REQUIRED` | reported |
+| incident_at_note | string | no | Fixed sentence: a timezone offset is required on write. The server does not assume one | system |
+| location_text | string | **yes** | Investigator place text, at most 500 characters. Not a geocode and not a discovered camera | reported |
 | created_at, updated_at | string | no | ISO-8601 UTC, system time (wall_clock of the *record*) | system |
 | counts.evidence_total/valid/invalid/pending | int | no | files | system |
 | counts.jobs_active, jobs_failed | int | no | | system |
 | counts.findings_unreviewed | int | no | | system |
-`POST /cases` body: `{title, designation, description?, allow_external_inference?, code?}` → 201 Case.
+`POST /cases` body: `{title, designation, description?, allow_external_inference?, code?, incident_at?, location_text?}`. `PATCH /cases/{id}` accepts those two fields as well as the existing title, description, status, and allow_external_inference. An omitted field is left as stored. `null` clears `incident_at` or `location_text`. Existing cases read back with both values null until set. → 201 Case on create.
 
 ## 2. Evidence — `GET /cases/{id}/evidence` → `{"items":[Evidence]}`; `POST /cases/{id}/evidence` (multipart: `file`, `kind`, `synthetic` required) → 201 `{evidence, duplicate, ...}`
 | Field | Type | Null | Notes | Basis |
@@ -222,7 +225,7 @@ Gaps between samples are **not** interpolated by the backend.
 Details by `ref_ids[0]`: `GET /cases/{id}/contradictions` → `{items:[{id, rule_id, event_a, event_b, strength(clear|marginal), basis{…, benign_explanations[]}, explanation, unresolved_questions[], review_status}]}`; `/corroborations` → `{items:[{id, rule_id, events[], independent, independence_reason, temporal_relation, explanation, review_status}]}`; `/gaps` → `{items:[{id, gap_type, scope{evidence_id?, case_from_ms?, case_to_ms?, …}, details, recommendation, refs[]}]}` (`scope.case_*_ms` are **case_ms**).
 
 ## 11. Other endpoints the frontend uses (shapes unchanged)
-Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` body `{scenario_id?, format?}`. `format` is `full` (default, 16 sections, unchanged) or `investigator` (four sections; see `docs/REPORT_FORMAT.md`). Response `{id, version, validation{passed, checks[]}, has_pdf, content}` is unchanged. `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
+Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attributes, links:[{id, ref_type(track|sensor_source|claim), ref_id, status(candidate|confirmed|rejected), basis, decided_by, decided_at}]}]}` · Sensor `GET /evidence/{id}/sensor-records` → `{items:[{row_no, time_ms(sensor_ms), si{speed(m/s), accel_long(m/s²), …}, valid, issues}], units_si, time_basis}` · Witnesses `GET /cases/{id}/witnesses`, `GET /witnesses/{id}/statements`, `GET /statements/{id}/claims` · Reports `POST /cases/{id}/reports` body `{scenario_id?, format?}`. Request `format` is `full` (default, 16-section technical dossier, unchanged) or `investigator` (four sections, the executive report; see `docs/REPORT_FORMAT.md`). Create and detail responses are unchanged. `GET /cases/{id}/reports` items add `format`: `executive` when the stored document says `investigator`, otherwise `full` (including documents written before a format key existed). The list does not include `content`. `GET /reports/{id}/markdown|pdf` · Dashboard `GET /dashboard`.
 
 ## 12. Frontend consumption (Claude) — what is wired and what is not
 Wired to real endpoints: dashboard, case list, workspace (evidence, actors, scenarios, timeline, contradictions, corroborations, gaps, findings, trajectories, seek, overlays, sensor-records, summaries, witnesses/claims), report generate/view, upload + job polling + scenario build.
@@ -251,7 +254,10 @@ The field lists are in `docs/RECONSTRUCTION_DATA_MODEL.md`. This section names t
 | `POST /cases/{id}/associations` | New. `201` `{item}`. Status is always `uncertain`. Does not create a corroboration |
 | `GET /cases/{id}/reconstruction/completeness?scenario_id` | New. See the data-model doc |
 | Incident routes in §7a | `incident-narrative` adds `hypothesis_explanation`. Clocks are on the timeline event, not copied onto incident cards |
-| Report `POST` | Unchanged. Default format remains `full` |
+| Report `POST` | Unchanged. Default request format remains `full` |
+| `GET /cases/{id}/reports` | Each item adds `format`: `executive` or `full`. `content` stays off the list |
+| `GET /cases/{id}/storyboard?scenario_id` | New. Stored frame references around each video event. See the data-model doc |
+| Case create, read, and `PATCH` | Add nullable `incident_at`, `incident_at_note`, and `location_text` |
 
 `PATCH` error codes: `RECORDING_WINDOW` (422), `OFFSET_REFERENCE_REQUIRED` (422), `EVIDENCE_NOT_FOUND` (404), `CAMERA_ROLE_INVALID` (422). Association `POST` uses `TRACK_NOT_FOUND` (404) and `ASSOCIATION_NEEDS_TWO_SOURCES` (422).
 
@@ -268,3 +274,4 @@ There is no breaking change in this section.
 | 2026-10-30 | Added `GET /cases/{id}/incident-events`, `/incident-narrative`, and `/incident-frames`. No field on timeline, event, or event summary was renamed. Report `format` still defaults to `full`. | Cursor | |
 | 2026-10-30 | §14 and `docs/RECONSTRUCTION_DATA_MODEL.md`. Additive `source`, `clocks`, `evidence_class`, `trace`, `overlaps`, `hypotheses`, associations, and completeness. No existing field renamed. | Cursor | |
 | 2026-10-30 | `incident-narrative` adds `hypothesis_explanation`. Existing narrative keys are unchanged. A rejected model sentence is not stored. | Cursor | |
+| 2026-10-30 | Cases gain nullable `incident_at` (offset required) and `location_text`. Report lists add `format` `executive` or `full`. `GET /cases/{id}/storyboard` cites stored frames. No existing key renamed. | Cursor | |

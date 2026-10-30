@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_actor, get_case
 from app.db import get_db
 from app.errors import AppError
-from app.models import (Actor, Case, ClockRecord, Contradiction, Corroboration, Event, EventSummary, EvidenceFile, GapRecord,
-                        InvestigationFinding, ReconstructionScenario, SourceAnnotation, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata)
+from app.models import (Actor, Case, ClockRecord, Contradiction, Corroboration, Event, EventSummary, EvidenceFile, ExtractedFrame, GapRecord,
+                        InvestigationFinding, ReconstructionScenario, SourceAnnotation, SourceEvent, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata)
 from app.services import audit, engine_rules as rules, incident, reconstruct, sync
+from app.services.storyboard import build_storyboard
 from app.services.reconstruction_view import clocks_for, completeness, evidence_class, group_index, hypotheses, overlaps, trace_for
 
 router = APIRouter(tags=["reconstruction"])
@@ -255,6 +256,37 @@ def incident_frames(event_id: str = Query(...), scenario_id: str | None = None, 
     if item is None:
         raise AppError(404, "EVENT_NOT_FOUND", f"No incident event with id {event_id}")
     return {"event_id": event_id, "items": incident.frames_for(db, item)}
+
+
+@router.get("/cases/{case_id}/storyboard")
+def storyboard(scenario_id: str | None = None, case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    """Stored frames around each video event. No image is created. incident_at is not consulted."""
+    scn = get_scenario(db, case, scenario_id)
+    rows = _events(db, scn)
+    source_ids = [((event.provenance or {}).get("source_event_id")) for event in rows]
+    source_ids = [item for item in source_ids if item]
+    sources = {}
+    if source_ids:
+        sources = {row.id: row for row in db.execute(select(SourceEvent).where(SourceEvent.id.in_(source_ids))).scalars()}
+    evidence_ids = list({event.source_id for event in rows if event.source_id})
+    frames = []
+    if evidence_ids:
+        frames = [{
+            "id": frame.id, "evidence_id": frame.evidence_id, "frame_no": frame.frame_no, "time_ms": frame.time_ms,
+            "thumbnail_path": frame.thumbnail_path,
+        } for frame in db.execute(select(ExtractedFrame).where(ExtractedFrame.evidence_id.in_(evidence_ids))).scalars()]
+    plain = []
+    for event in rows:
+        obs = event.observations or {}
+        cited = obs.get("frames")
+        if not cited:
+            source = sources.get((event.provenance or {}).get("source_event_id"))
+            cited = ((source.source_ref if source else None) or {}).get("frames") or []
+        plain.append({
+            "id": event.id, "source_id": event.source_id, "source_type": event.source_type, "event_type": event.event_type,
+            "title": event.title, "observations": obs, "cited_frames": list(cited),
+        })
+    return {"scenario_id": scn.id} | build_storyboard(plain, frames)
 
 
 def _association_out(row: VehicleAssociation) -> dict:

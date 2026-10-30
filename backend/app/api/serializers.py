@@ -51,9 +51,16 @@ def job_out(job: ProcessingJob) -> dict:
             "started_at": job.started_at, "finished_at": job.finished_at}
 
 
+INCIDENT_AT_NOTE = (
+    "Investigator-stated instant. A timezone offset is required on write. "
+    "The server does not assume one, does not read this from a file, and does not use it to choose frames."
+)
+
+
 def case_out(case: Case, counts: dict | None = None) -> dict:
     out = {"id": case.id, "code": case.code, "title": case.title, "description": case.description, "status": case.status,
            "designation": case.designation, "allow_external_inference": case.allow_external_inference,
+           "incident_at": _iso(case.incident_at), "incident_at_note": INCIDENT_AT_NOTE, "location_text": case.location_text,
            "created_at": case.created_at, "updated_at": case.updated_at}
     if counts is not None:
         out["counts"] = counts
