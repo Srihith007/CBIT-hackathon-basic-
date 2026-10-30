@@ -28,7 +28,7 @@ export default function Evidence({ caseId, evidence }) {
   const [wit, setWit] = useState([]);
   useEffect(() => {
     api.witnesses(caseId).then(async (r) => {
-      const all = await Promise.all(r.items.map(async (w) => (await fetch(`/api/v1/witnesses/${w.id}/statements`).then((x) => x.json())).items.map((s) => ({ s, label: w.label }))));
+      const all = await Promise.all(r.items.map(async (w) => (await api.statements(w.id)).items.map((s) => ({ s, label: w.label }))));
       setWit(all.flat());
     }).catch(() => {});
   }, [caseId]);

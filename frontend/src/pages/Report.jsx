@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card } from '../ui-kit';
 import { Check, X } from 'lucide-react';
+import Shell from '../layout';
 import { api } from '../api';
 
 export default function ReportPage() {
@@ -16,8 +17,8 @@ export default function ReportPage() {
   const make = async () => { setBusy(true); setErr(null); try { await open(await api.report(caseId)); } catch (e) { setErr(e.message); } setBusy(false); };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
-      <Link to={`/cases/${caseId}`} className="t-caption text-fg-3">← Workspace</Link>
+    <Shell crumbs={[{ label: 'Workspace', to: `/cases/${caseId}` }, { label: 'Report' }]}>
+    <div className="mx-auto max-w-4xl">
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">Investigation report</h1>
         <Button onClick={make} loading={busy} className="ml-auto" variant="primary">{busy ? 'Building…' : report ? 'Generate a new version' : 'Generate report'}</Button>
@@ -45,5 +46,6 @@ export default function ReportPage() {
       )}
       {!report && !err && <p className="t-small text-fg-2">No report has been generated for this case yet.</p>}
     </div>
+    </Shell>
   );
 }

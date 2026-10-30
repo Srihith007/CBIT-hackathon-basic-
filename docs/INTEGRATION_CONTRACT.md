@@ -207,13 +207,14 @@ Actors `GET /cases/{id}/actors` → `{items:[{id, case_id, label, kind, attribut
 ## 12. Frontend consumption (Claude) — what is wired and what is not
 Wired to real endpoints: dashboard, case list, workspace (evidence, actors, scenarios, timeline, contradictions, corroborations, gaps, findings, trajectories, seek, overlays, sensor-records, summaries, witnesses/claims), report generate/view, upload + job polling + scenario build.
 Frontend rules that follow from this contract: it displays `synthetic`, `oracle:`/`external:` model ids, `unplaced` events, `backfilled`, `moving_camera` and gap bands as the backend reports them; it never computes confidence, never fills gaps and never invents progress (progress comes only from `job.status`/`job.progress`).
-**Known frontend defects against this contract (being fixed in `frontend/`):** (1) upload polling used job statuses `running`/`retrying`, which do not exist; the contract above (`validating`, `processing`) is authoritative.
+**Known frontend defects against this contract:** none open. (Fixed: upload polling used non-existent job statuses.) Frontend usage notes are in `docs/frontend/FRONTEND_INTEGRATION_HANDOFF.md`.
 
 ## 13. Requests from frontend to backend (not changes; need agreement before implementation)
 1. **Job progress detail:** an optional `stage_label` or percent per stage so the upload page can show real progress. Today `progress` exists but its meaning per stage is undocumented. Please document it or confirm it is 0..1 within the stage.
 2. **Accident-moment events for real video:** the workspace shows summaries at event timestamps. For real footage it needs `possible_collision` events (media_ms and, for a single video, case_ms with the video as its own reference clock, already implemented). Please confirm that detection thresholds are being tuned on real clips and that no event is emitted without the supporting track evidence.
 3. **Uploaded-video metadata:** `video.pts_start_ms` is returned; please confirm `links.stream` playback copies always start at media 0.
-4. **A job/stage list per evidence** (`GET /evidence/{id}/jobs`) would remove client-side filtering; optional.
+4. **Activity/audit feed, cross-case jobs and findings lists** for the dashboard (`GET /activity`, `GET /jobs?status=`, `GET /findings?review_status=`): today the UI fans out per case.
+5. **A job/stage list per evidence** (`GET /evidence/{id}/jobs`) would remove client-side filtering; optional.
 
 ## Change log
 | Date | Change | Proposed by | Agreed by |

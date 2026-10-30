@@ -1,23 +1,37 @@
 import { create } from 'zustand';
+import { acknowledge, createSeekState, isSettled, request } from './lib/seek';
 
-/** One clock for the whole workspace. While playing, the master <video> writes `currentMs` (case time); everything else reads it.
- *  Seeking is a request with an increasing id so a late "seeked" event from an older request can never win. */
-export const useWorkspace = create((set, get) => ({
+/** One clock for the workspace. While playing, the master <video> writes `currentMs` (case ms) from a single rAF loop.
+ *  Components must subscribe with selectors; display-only consumers (playhead, scrubber) use `useWorkspace.subscribe` and touch the DOM directly. */
+export const useWorkspace = create((set) => ({
   caseId: null,
   scenarioId: null,
   currentMs: 0,
   playing: false,
   rate: 1,
   activeEventId: null,
+  pinnedId: null,
+  pinnedAt: null,
   selectedActorId: null,
-  seekRequest: { id: 0, ms: 0 },
+  primaryVideoId: null,
+  seek: createSeekState(),
+  seekSettled: true,
   overlays: { boxes: true, ids: true },
-  reset: (caseId, scenarioId) => set({ caseId, scenarioId, currentMs: 0, playing: false, activeEventId: null, selectedActorId: null, seekRequest: { id: 0, ms: 0 } }),
-  setTime: (ms) => set({ currentMs: ms }),
+  reset: (caseId, scenarioId) => set({ caseId, scenarioId, currentMs: 0, playing: false, activeEventId: null, pinnedId: null, pinnedAt: null, selectedActorId: null, seek: createSeekState(), seekSettled: true }),
+  setTime: (currentMs) => set({ currentMs }),
   setPlaying: (playing) => set({ playing }),
   setRate: (rate) => set({ rate }),
-  setActive: (activeEventId) => set({ activeEventId }),
+  setActive: (activeEventId) => set((s) => (s.activeEventId === activeEventId ? s : { activeEventId })),
+  /** Explicit selection: pins the event at the time it seeks to. */
+  selectEvent: (id, ms) => set({ activeEventId: id, pinnedId: id, pinnedAt: ms ?? null }),
   selectActor: (selectedActorId) => set({ selectedActorId }),
-  seek: (ms) => set((s) => ({ seekRequest: { id: s.seekRequest.id + 1, ms }, currentMs: ms })),
+  setPrimaryVideo: (primaryVideoId) => set({ primaryVideoId }),
+  /** Latest-wins: returns the request id the player must echo back through `ackSeek`. */
+  requestSeek: (ms) => {
+    let id = 0;
+    set((s) => { const next = request(s.seek, ms); id = next.latest; return { seek: next, seekSettled: false, currentMs: ms }; });
+    return id;
+  },
+  ackSeek: (id) => set((s) => { const next = acknowledge(s.seek, id); return next === s.seek ? s : { seek: next, seekSettled: isSettled(next) }; }),
   toggleOverlay: (k) => set((s) => ({ overlays: { ...s.overlays, [k]: !s.overlays[k] } })),
 }));

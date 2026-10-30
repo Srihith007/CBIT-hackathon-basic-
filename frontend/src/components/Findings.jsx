@@ -1,21 +1,25 @@
 import { useState } from 'react';
-import { Badge, Button, Card, Segmented } from '../ui-kit';
+import { Badge, Button, Card, EmptyState, Segmented, useToast } from '../ui-kit';
 import { api } from '../api';
 
 const KINDS = [['contradiction', 'Contradictions'], ['corroboration', 'Corroborations'], ['gap', 'Gaps'], ['open_question', 'Open questions'], ['inference', 'Inferences']];
 
 /** Findings for the investigator to review. A finding is a prompt for judgment, never a conclusion. */
 export default function Findings({ findings, contradictions, corroborations, gaps, onFocusEvent, onReload }) {
+  const toast = useToast();
   const [kind, setKind] = useState('contradiction');
   const rows = findings.filter((f) => f.kind === kind);
   const con = Object.fromEntries(contradictions.map((c) => [c.id, c]));
   const crb = Object.fromEntries(corroborations.map((c) => [c.id, c]));
   const gap = Object.fromEntries(gaps.map((g) => [g.id, g]));
-  const review = async (f, status) => { await api.review(f.id, status); onReload(); };
+  const review = async (f, status) => {
+    try { await api.review(f.id, status); toast({ title: status === 'reviewed' ? 'Marked as reviewed' : 'Marked as disputed', type: 'success' }); onReload(); }
+    catch (e) { toast({ title: 'Could not save the review', description: e.message, type: 'error' }); }
+  };
   return (
     <div>
       <Segmented value={kind} onChange={setKind} options={KINDS.map(([id, label]) => ({ id, label: `${label} (${findings.filter((f) => f.kind === id).length})` }))} label="Finding kind" size="sm" />
-      {rows.length === 0 && <p className="t-small mt-4 text-fg-3">None for this reconstruction.</p>}
+      {rows.length === 0 && <EmptyState className="mt-4" title="Nothing in this category" description="No findings of this kind were produced for this reconstruction." />}
       <ul className="mt-4 space-y-3">
         {rows.map((f) => {
           const c = con[f.ref_ids[0]], r = crb[f.ref_ids[0]], g = gap[f.ref_ids[0]];
