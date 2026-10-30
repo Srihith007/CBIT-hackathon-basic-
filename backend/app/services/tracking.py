@@ -177,3 +177,8 @@ def build_tracks(frames: list[Frame], assign: dict[int, int], p: dict, frame_siz
                     cands.append({"from_track": a["track_id"], "to_track": b["track_id"], "gap_ms": dt, "distance_px": round(dist, 1),
                                   "status": "candidate", "basis": "same class, short gap, nearby position; not merged"})
     return tracks, cands
+
+
+def propose_cross_camera_matches(tracks: list[dict]) -> list:
+    """Tracker ids are per video and per run. Equal integers are not a match and produce no association."""
+    return []
