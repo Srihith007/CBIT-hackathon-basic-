@@ -1,5 +1,5 @@
 import { Badge, ProgressBar } from '../ui-kit';
-import { STAGE_LABEL, STATUS_LABEL, jobFraction, jobsFor } from '../lib/jobs';
+import { STAGE_LABEL, STATUS_LABEL, jobFraction, jobsFor, jobErrorMessage } from '../lib/jobs';
 
 const VARIANT = { pending: 'neutral', validating: 'info', processing: 'info', completed: 'success', failed: 'danger', partially_completed: 'warning' };
 
@@ -18,7 +18,7 @@ export default function JobStages({ jobs, evidenceId, empty = 'No processing job
               <Badge variant={VARIANT[j.status] || 'neutral'}>{STATUS_LABEL[j.status] || j.status}</Badge>
             </div>
             {f !== null && j.status !== 'failed' && <ProgressBar value={f} ariaLabel={`${STAGE_LABEL[j.stage] || j.stage} progress`} showValue size="sm" />}
-            {j.status === 'failed' && <p className="t-caption text-danger">{j.error || 'The job failed. The backend recorded no message.'}</p>}
+            {j.status === 'failed' && <p className="t-caption text-danger">{jobErrorMessage(j.error)}</p>}
             {j.result?.warnings?.length > 0 && <p className="t-caption text-fg-3">{j.result.warnings.join(' · ')}</p>}
           </li>
         );

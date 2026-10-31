@@ -28,3 +28,13 @@ export function jobFraction(j) {
 }
 
 export const pipelineDone = (jobs) => jobs.length > 0 && !jobs.some((j) => ACTIVE.includes(j.status));
+
+/** API failures can be plain text or structured {type, message} objects. */
+export function jobErrorMessage(error) {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    if (typeof error.message === 'string' && error.message.trim()) return error.message;
+    if (typeof error.type === 'string' && error.type.trim()) return error.type;
+  }
+  return 'The job failed. The backend recorded no message.';
+}

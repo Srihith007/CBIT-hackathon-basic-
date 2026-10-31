@@ -200,7 +200,7 @@ describe('guided flow: processing shows real job stages only', () => {
     resume();
     await screen.findByLabelText('Upload evidence');
     api.evidence.mockResolvedValue({ items: [{ id: 'ev_1', kind: 'cctv', original_filename: 'north.mp4' }] });
-    api.jobs.mockResolvedValue({ items: [{ id: 'j', evidence_id: 'ev_1', stage: 'detect', status: 'failed', error: 'weights missing' }] });
+    api.jobs.mockResolvedValue({ items: [{ id: 'j', evidence_id: 'ev_1', stage: 'detect', status: 'failed', error: { type: 'FileNotFoundError', message: 'weights missing' } }] });
     fireEvent.click(screen.getByRole('button', { name: /Continue to processing/ }));
     expect(await screen.findByText(/Detect vehicles and people failed: weights missing/)).toBeInTheDocument();
     expect(api.buildScenario).not.toHaveBeenCalled();

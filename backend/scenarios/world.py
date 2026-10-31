@@ -249,7 +249,7 @@ class Scenario:
             a, b = (int(drop[0] * FPS), int(drop[1] * FPS))
             tmp = path.with_suffix(".tmp.mp4")
             path.rename(tmp)
-            subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tmp), "-vf", f"select='not(between(n,{a},{b}))'", "-fps_mode", "passthrough",
+            subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tmp), "-vf", f"select='not(between(n,{a},{b}))'", "-vsync", "0",
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True)
             tmp.unlink()
             times = [t for i, t in enumerate(times) if not a <= i <= b]

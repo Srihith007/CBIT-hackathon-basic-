@@ -208,7 +208,7 @@ def make_playback(src: Path, dst: Path, pts_start_ms: float, rotation: int | Non
         mode = "transcode"
         cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-map", "0:v:0",
                "-vf", "setpts=PTS-STARTPTS,format=yuv420p",
-               "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+               "-vsync", "0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
         if stream.get("_audio"):
             cmd += ["-map", "0:a:0", "-af", "asetpts=PTS-STARTPTS", "-c:a", "aac", "-b:a", "96k"]
         cmd += ["-movflags", "+faststart", str(dst)]

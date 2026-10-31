@@ -11,6 +11,7 @@ import SensorMapping from '../components/SensorMapping';
 import EvidenceUploader from '../components/EvidenceUploader';
 import { Statement } from '../components/Evidence';
 import { api } from '../api';
+import { ACTIVE } from '../lib/jobs';
 import { useCaseContext } from '../caseContext';
 import { effectiveDesignation } from '../lib/overview';
 import { clockTouched, fromSource, toClockBody, toSourceBody, validateMeta } from '../lib/sourceMeta';
@@ -184,6 +185,12 @@ export default function EvidencePage() {
   }, [caseId, select]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPick(null); }, [caseId]);
+  const processing = state.status === 'ready' && state.jobs.some(j => ACTIVE.includes(j.status));
+  useEffect(() => {
+    if (!processing) return undefined;
+    const timer = setInterval(load, 1500);
+    return () => clearInterval(timer);
+  }, [processing, load]);
   const setViewKeep = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage unavailable */ } };
 
   const { c, ev = [], jobs = [], sync, statements = [], sensors = [] } = state;

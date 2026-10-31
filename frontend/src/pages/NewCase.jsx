@@ -1,3 +1,4 @@
+import { jobErrorMessage } from '../lib/jobs';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Shell from '../layout';
@@ -87,7 +88,7 @@ function Processing({ c }) {
         const active = j.items.some((x) => ACTIVE.includes(x.status));
         const hasVideo = ev.items.some((e) => e.kind === 'cctv' || e.kind === 'dashcam');
         const tracked = j.items.some((x) => x.stage === 'track' && x.status === 'completed');
-        if (failed) { setErr(`${STAGE_LABEL[failed.stage] || failed.stage} failed: ${failed.error || 'see job log'}`); setPhase('failed'); return; }
+        if (failed) { setErr(`${STAGE_LABEL[failed.stage] || failed.stage} failed: ${jobErrorMessage(failed.error)}`); setPhase('failed'); return; }
         if (!active && j.items.length && (tracked || !hasVideo)) { setPhase('ready'); return; }
       } catch (x) { if (!stop) { setErr(x.message); setPhase('failed'); } return; }
       timer = setTimeout(tick, 1500);

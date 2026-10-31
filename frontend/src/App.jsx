@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes, useParams } from 'react-router-dom';
+import RouteErrorBoundary from './components/RouteErrorBoundary';
+import { Navigate, Route, Routes, useParams, useLocation } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import Cases from './pages/Cases';
@@ -21,7 +22,9 @@ const scoped = (section, element) => (
 );
 
 export default function App() {
+  const { pathname } = useLocation();
   return (
+    <RouteErrorBoundary key={pathname}>
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/dashboard" element={<Dashboard />} />
@@ -34,5 +37,6 @@ export default function App() {
       <Route path="/cases/:caseId/report" element={<To section="reports" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </RouteErrorBoundary>
   );
 }
