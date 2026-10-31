@@ -61,7 +61,7 @@ describe('reconstruction workspace order', () => {
   it('lists video, summary, vehicles, key observations, keyframes, timeline, contradictions and gaps, scenarios, then technical details', async () => {
     const { container } = setup({ assoc: new Error('404'), completeness: new Error('404') });
     await screen.findByText('No collision or near miss was identified in the analysed evidence.');
-    const order = ['Camera filter', 'Overview', 'Vehicles', 'Key observations', 'Timeline', 'Contradictions and gaps', 'Reconstruction scenarios'];
+    const order = ['Camera filter', 'Overview', 'Vehicles', 'Key observations', 'Timeline', 'Investigation findings', 'Reconstruction scenarios'];
     const positions = order.map((name) => {
       const el = container.querySelector(`[aria-label="${name}"]`);
       expect(el, name).not.toBeNull();
@@ -151,10 +151,10 @@ describe('cross-camera association, gaps and sensors', () => {
   });
   it('lists a recording gap as missing evidence for the camera it belongs to', async () => {
     setup({ gaps: [{ id: 'g1', gap_type: 'video_missing_interval', scope: { evidence_id: 'ev_s', from_ms: 5000, to_ms: 5600 }, recommendation: 'Ask for the original export.' }] });
-    const gaps = await screen.findByLabelText('Recording gaps');
-    expect(gaps).toHaveTextContent('Missing interval in the recording');
-    expect(gaps).toHaveTextContent('South camera');
-    expect(screen.getByLabelText('Contradictions and gaps')).toHaveTextContent('not a contradiction');
+    const gap = await screen.findByRole('listitem', { name: /Evidence gap: Missing interval in the recording/ });
+    expect(gap).toHaveTextContent('South camera');
+    expect(gap).toHaveTextContent('Ask for the original export.');
+    expect(screen.getByLabelText('Investigation findings')).toHaveTextContent('Review conflicting accounts');
   });
   it('shows Unavailable for the sensor panel when the case has no sensor file', async () => {
     setup();
@@ -163,7 +163,7 @@ describe('cross-camera association, gaps and sensors', () => {
   });
   it('shows empty contradiction, corroboration and gap states', async () => {
     setup();
-    expect(await screen.findByText('No contradiction, corroboration or gap is stored for this scenario.')).toBeInTheDocument();
+    expect(await screen.findByText('No findings stored for this scenario')).toBeInTheDocument();
   });
 });
 

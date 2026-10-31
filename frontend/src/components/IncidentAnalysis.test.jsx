@@ -144,6 +144,6 @@ describe('primary workspace', () => {
     const details = screen.getByText('Technical details').closest('details');
     expect(details.open).toBe(false);
     expect(details).toHaveTextContent('No trajectory for this camera yet.');
-    expect(screen.getByLabelText('Contradictions and gaps')).toHaveTextContent('consistent with an impact, not proof');
+    expect(screen.getByLabelText('Investigation findings')).toHaveTextContent('consistent with an impact, not proof');
   });
 });

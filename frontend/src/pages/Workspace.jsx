@@ -30,7 +30,8 @@ import { buildExecutive } from '../lib/executive';
 import { useAutoPause, useMotions } from '../hooks';
 import AccidentAlert from '../components/AccidentAlert';
 import IncidentSequence from '../components/IncidentSequence';
-import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
+import InvestigationFindings from '../components/InvestigationFindings';
+import { Associations, CameraFilter, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
 /** The navigation rail starts collapsed on screens narrower than 1600 px so the video stays the main element; the choice is remembered. */
@@ -184,7 +185,7 @@ export default function Workspace() {
   }, [model]);
   const clearFinding = () => useWorkspace.getState().setFinding(null, [], null);
   const review = async (id, status) => {
-    try { await api.review(id, status); toast({ title: status === 'reviewed' ? 'Marked as reviewed' : 'Marked as disputed', type: 'success' }); const f = await api.findings(caseId, scenarioId); setData((d) => ({ ...d, finds: f.items })); }
+    try { await api.review(id, status); toast({ title: status === 'reviewed' ? 'Marked as reviewed' : status === 'disputed' ? 'Marked as disputed' : 'Review reset', type: 'success' }); const f = await api.findings(caseId, scenarioId); setData((d) => ({ ...d, finds: f.items })); }
     catch (e) { toast({ title: 'Could not save the review', description: e.message, type: 'error' }); }
   };
   const stepEvent = useCallback((dir) => {
@@ -346,7 +347,8 @@ export default function Workspace() {
             {navOpen && <div className="order-3 xl:order-1 [@media(max-height:1100px)]:max-h-full [@media(max-height:1100px)]:overflow-y-auto">{NavRail}</div>}
           </div>
 
-          <ContradictionsAndGaps cons={data.cons} crbs={data.crbs} gaps={shown.gaps} nameOf={nameOf} />
+          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
+                              onSeekMedia={(evId, ms) => { window.scrollTo({ top: 0, behavior: 'smooth' }); seekToFrame({ evidence_id: evId, time_ms: ms }); }} />
           <Overlaps overlaps={shown.overlaps} nameOf={nameOf} onSeek={seekTo} />
           <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses || []} completeness={complete} onPickEvent={pickById} />
           <details className="mt-4 rounded-lg border border-line p-3">

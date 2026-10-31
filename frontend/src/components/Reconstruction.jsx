@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Field, SectionHeader, Select } from '../ui-kit';
 import { api } from '../api';
-import Panel from './Panel';
 import { formatTime } from '../lib/time';
 
 
@@ -58,60 +57,6 @@ export function KeyObservations({ events, activeId, onSelect, nameOf }) {
   );
 }
 
-const GAP_LABEL = {
-  video_missing_interval: 'Missing interval in the recording',
-  no_camera_calibration: 'No camera calibration',
-  clock_inconsistency: 'Clock relations disagree',
-};
-const gapLabel = (t) => GAP_LABEL[t] || String(t).split('_').join(' ');
-
-/** Gaps are missing evidence, never contradictions. Contradictions and corroborations are listed from the stored scenario only. */
-const GROUP = {
-  danger: { bar: 'border-l-danger', dot: 'bg-danger' },
-  success: { bar: 'border-l-success', dot: 'bg-success' },
-  warning: { bar: 'border-l-warning', dot: 'bg-warning' },
-};
-
-/** One column of the section: the same bordered surface and left-accent rows as the findings and the sequence cards. */
-function Group({ label, title, count, tone, empty, children }) {
-  return (
-    <Panel as="div" aria-label={label} className="p-3">
-      <h3 className="mb-2 flex items-center gap-2 text-[0.8125rem] font-semibold text-fg"><i className={`h-2 w-2 rounded-full ${GROUP[tone].dot}`} aria-hidden />{title}<Badge variant="neutral">{count}</Badge></h3>
-      {count === 0 ? <p className="t-small text-fg-3">{empty}</p> : children}
-    </Panel>
-  );
-}
-const Row = ({ tone, children }) => <li className={`rounded-lg border border-line border-l-4 ${GROUP[tone].bar} bg-surface px-3 py-2`}>{children}</li>;
-
-export function ContradictionsAndGaps({ cons, crbs, gaps, nameOf }) {
-  const none = !cons.length && !crbs.length && !gaps.length;
-  return (
-    <section aria-label="Contradictions and gaps" className="mt-4">
-      <SectionHeader title="Contradictions and gaps" description="A contradiction means two sources describe the same thing differently, not which is wrong. A gap is missing evidence, not a contradiction." className="!mb-3" />
-      {none ? <p className="t-small text-fg-3">No contradiction, corroboration or gap is stored for this scenario.</p> : (
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Group label="Contradictions" title="Contradictions" count={cons.length} tone="danger" empty="None stored.">
-            <ul className="space-y-2">{cons.map((r) => <Row key={r.id} tone="danger"><p className="t-small text-fg-2">{r.explanation}</p><p className="mono t-caption mt-1 text-fg-3">{r.rule_id} · events {r.event_a}, {r.event_b}</p></Row>)}</ul>
-          </Group>
-          <Group label="Corroborations" title="Corroborations" count={crbs.length} tone="success" empty="None stored. Two files with identical bytes are not independent sources.">
-            <ul className="space-y-2">{crbs.map((r) => <Row key={r.id} tone="success"><p className="t-small text-fg-2">{r.explanation}</p><p className="mono t-caption mt-1 text-fg-3">{r.rule_id} · events {r.events.join(', ')}</p></Row>)}</ul>
-          </Group>
-          <Group label="Recording gaps" title="Gaps" count={gaps.length} tone="warning" empty="None stored.">
-            <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
-              {gaps.map((g) => (
-                <Row key={g.id} tone="warning">
-                  <p className="t-small font-medium text-fg">{gapLabel(g.gap_type)}</p>
-                  <p className="t-caption mt-0.5 flex flex-wrap items-center gap-1.5 text-fg-3"><Badge variant="neutral">{g.scope?.evidence_id ? nameOf(g.scope.evidence_id) : 'Case-wide'}</Badge>{g.scope?.from_ms != null && <span className="mono">media {formatTime(g.scope.from_ms)} to {formatTime(g.scope.to_ms)}</span>}</p>
-                  {g.recommendation && <p className="t-caption mt-1 text-fg-2">{g.recommendation}</p>}
-                </Row>
-              ))}
-            </ul>
-          </Group>
-        </div>
-      )}
-    </section>
-  );
-}
 
 /** Cross-camera associations are only what the backend recorded. Equal track numbers on two cameras are never shown as one vehicle. */
 export function Associations({ state, nameOf, onAdd, videos = [], disabled }) {
