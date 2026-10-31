@@ -60,7 +60,7 @@ def load(api, package):
             with video.open('rb') as f:
                 uploaded=request('POST',f'cases/{cid}/evidence',files={'file':(source['original_filename'],f,'video/mp4')},data={'kind':'cctv','synthetic':'false'})
             vid=uploaded['evidence']['id']
-            request('PATCH',f'evidence/{vid}/source',json={'display_name':'Video 01 · original footage','camera_role':'cctv'})
+            request('PATCH',f'evidence/{vid}/source',json={'display_name':f"{m['id'][:6].replace('-', ' ')} · original footage",'camera_role':'cctv'})
             # No video actor link is fabricated. Those tracks remain available for investigator review.
             for sensor in m['sensors']:
                 with (folder/sensor['file']).open('rb') as f:
