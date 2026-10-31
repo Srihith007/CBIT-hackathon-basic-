@@ -177,3 +177,84 @@ describe('executive overview', () => {
     expect(screen.getByText(/Verification:/)).toBeInTheDocument();
   });
 });
+
+import AccidentAlert from './AccidentAlert';
+import IncidentSequence from './IncidentSequence';
+import { useDecisions } from '../decisions';
+
+describe('accident alert and incident sequence', () => {
+  const coll = { id: 'c1', event_type: 'possible_collision', category: 'machine_detection', title: 'Possible collision between tracked vehicles', start_ms: 4600, end_ms: 4600, uncertainty_ms: 100, source_type: 'video_cctv', source_id: 'ev1', synchronized: true, review_status: 'unreviewed',
+    observations: { source_time_ms: [4600, 4600], track_ids: [3, 4], abrupt_speed_changes: [{ track_id: 3, relative_speed_before: 1.2, relative_speed_after: 0.3 }] } };
+  const card = { event_id: 'c1', before: { frame_id: 1, evidence_id: 'ev1', frame_no: 40, time_ms: 4200, thumbnail_url: '/b.jpg' }, during: [{ frame_id: 2, evidence_id: 'ev1', frame_no: 46, time_ms: 4640, thumbnail_url: '/d.jpg' }], after: null, missing: ['after'] };
+  const props = (over = {}) => ({ alert: { eventId: 'c1', atMs: 4600, paused: true }, event: coll, events: [coll], cameraName: 'North camera', card, caseId: 'case_1', onOpenFrame: vi.fn(), onDetails: vi.fn(), onEvidence: vi.fn(), onResume: vi.fn(), onDismiss: vi.fn(), onSeekFrame: vi.fn(), ...over });
+  beforeEach(() => { localStorage.clear(); useDecisions.setState({ all: {} }); });
+
+  it('3-5. shows the camera, time, type, tracks, uncertainty, the possible-not-confirmed wording and the keyframes', () => {
+    wrap(<AccidentAlert {...props()} />);
+    const a = screen.getByRole('alert');
+    expect(a).toHaveTextContent('Possible accident detected');
+    expect(a).toHaveTextContent('not a confirmed collision');
+    expect(a).toHaveTextContent('North camera');
+    expect(a).toHaveTextContent('case 00:04.600');
+    expect(a).toHaveTextContent('possible collision');
+    expect(a).toHaveTextContent('#3, #4 (identity not confirmed)');
+    expect(a).toHaveTextContent('±0.100 s');
+    expect(a).toHaveTextContent('Track #3: movement pace fell from 1.20 to 0.30');
+    expect(screen.getByRole('button', { name: /Before frame at 00:04.200/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Event frame at 00:04.640/ })).toBeInTheDocument();
+    expect(a).toHaveTextContent('(+40 ms from the event)'); // nearest stored frame, offset labelled
+    expect(screen.queryByRole('button', { name: /After frame/ })).toBeNull(); // a missing frame is not invented
+  });
+  it('7. clicking a keyframe seeks to that frame, and the actions are wired', () => {
+    const p = props();
+    wrap(<AccidentAlert {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: /Event frame at 00:04.640/ }));
+    expect(p.onSeekFrame).toHaveBeenCalledWith(card.during[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume playback' })); expect(p.onResume).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open exact frame' })); expect(p.onOpenFrame).toHaveBeenCalledWith(coll);
+    fireEvent.click(screen.getByRole('button', { name: 'View event details' })); expect(p.onDetails).toHaveBeenCalledWith(coll);
+    fireEvent.click(screen.getByRole('button', { name: 'Review evidence' })); expect(p.onEvidence).toHaveBeenCalledWith(coll);
+  });
+  it('dismissing records no decision; the four investigator decisions are separate and stored', () => {
+    const p = props();
+    wrap(<AccidentAlert {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss alert' }));
+    expect(p.onDismiss).toHaveBeenCalled();
+    expect(useDecisions.getState().all).toEqual({});
+    fireEvent.click(screen.getByRole('button', { name: 'Not relevant' }));
+    expect(useDecisions.getState().all.case_1.c1.status).toBe('not_relevant');
+    expect(screen.getByRole('button', { name: 'Not relevant' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/Not in the audit history yet/)).toBeInTheDocument();
+  });
+  it('says playback continues when auto-pause is off', () => {
+    wrap(<AccidentAlert {...props({ alert: { eventId: 'c1', atMs: 4600, paused: false } })} />);
+    expect(screen.getByText('auto-pause is off: playback continues')).toBeInTheDocument();
+  });
+  it('shows nothing without an alert (a video with no candidate)', () => {
+    wrap(<AccidentAlert {...props({ alert: null })} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  const board = { strips: [{ evidence_id: 'ev1', items: [card] }], omitted: [] };
+  const seqProps = (over = {}) => ({ events: [coll, { ...coll, id: 'i1', event_type: 'vehicle_enters_scene', title: 'A road user enters', start_ms: 200, observations: {} }, { ...coll, id: 'n1', event_type: 'possible_near_miss', title: 'Near miss', start_ms: 3000, observations: {} }], unplaced: [{ id: 'u1', title: 'No-time event', source_type: 'witness' }], board, activeId: null, nameOf: () => 'North camera', caseId: 'case_1', onSelect: vi.fn(), onSeekFrame: vi.fn(), onOpenFrame: vi.fn(), ...over });
+  it('6. the sequence is time-ordered cards; clicking one selects it; info events are hidden until asked for; unplaced events are apart', () => {
+    const p = seqProps();
+    wrap(<IncidentSequence {...p} />);
+    const cardsEls = screen.getAllByRole('button', { name: /^\d\d:\d\d\.\d{3} / });
+    expect(cardsEls.map((b) => b.getAttribute('aria-label'))).toEqual(['00:03.000 Near miss', '00:04.600 Possible collision between tracked vehicles']);
+    fireEvent.click(cardsEls[1]);
+    expect(p.onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
+    expect(screen.getByText(/1 event with no usable time/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Everything' }));
+    expect(screen.getAllByRole('button', { name: /^\d\d:\d\d\.\d{3} / })).toHaveLength(3);
+  });
+  it('the active card expands to its keyframe strip and details, and importance filtering works', () => {
+    wrap(<IncidentSequence {...seqProps({ activeId: 'c1' })} />);
+    const d = screen.getByLabelText('Event details');
+    expect(d).toHaveTextContent('video time 00:04.600');
+    expect(d).toHaveTextContent('on the case clock');
+    expect(screen.getByRole('button', { name: /Event frame at 00:04.640/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Possible accident' }));
+    expect(screen.getAllByRole('button', { name: /^\d\d:\d\d\.\d{3} / })).toHaveLength(1);
+  });
+});

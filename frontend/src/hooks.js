@@ -37,3 +37,28 @@ export function useMotions(moment, trajs) {
   }, [moment?.eventId]); // eslint-disable-line react-hooks/exhaustive-deps
   return motions;
 }
+
+import { advance, buildTriggers, createTriggerState } from './lib/alerts';
+
+/** The playback trigger: watches the single clock and, on continuous forward playback, raises the possible-accident alert once per event.
+ *  With auto-pause on it pauses and seeks to the event's exact time; with it off the alert is a notice and playback continues.
+ *  Resets when `resetKey` changes (scenario or camera switch). */
+export function useAutoPause(events, resetKey) {
+  const policy = useWorkspace((s) => s.policy);
+  useEffect(() => {
+    const triggers = buildTriggers(events, policy);
+    let state = createTriggerState();
+    let prev = useWorkspace.getState().currentMs;
+    return useWorkspace.subscribe((s, p) => {
+      if (s.currentMs === p.currentMs) return;
+      const r = advance(triggers, state, prev, s.currentMs);
+      state = r.state;
+      prev = s.currentMs;
+      if (!r.fire || !s.playing) return;
+      const e = r.fire.lead;
+      if (policy.autoPause) { s.setPlaying(false); s.requestSeek(e.start_ms); }
+      s.setAlert({ eventId: e.id, atMs: e.start_ms, paused: policy.autoPause, members: r.fire.members.map((m) => m.id) });
+      s.selectEvent(e.id, e.start_ms);
+    });
+  }, [events, policy.autoPause, policy.minTier, policy.cooldownMs, resetKey]); // eslint-disable-line react-hooks/exhaustive-deps
+}

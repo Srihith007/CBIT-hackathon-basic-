@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
+import { Alert, Badge, Button, Checkbox, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
 import { FileText, Film, Gauge, PanelLeftClose, PanelLeftOpen, Users } from 'lucide-react';
 import Shell from '../layout';
 import { api } from '../api';
@@ -27,7 +27,9 @@ import CaseMeta from '../components/CaseMeta';
 import IncidentMoment, { MomentBar } from '../components/IncidentMoment';
 import { pickMoment } from '../lib/moment';
 import { buildExecutive } from '../lib/executive';
-import { useMotions } from '../hooks';
+import { useAutoPause, useMotions } from '../hooks';
+import AccidentAlert from '../components/AccidentAlert';
+import IncidentSequence from '../components/IncidentSequence';
 import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
@@ -45,6 +47,19 @@ function EventTab({ event, nameOf, board }) {
       </div>
       <EventClocks event={event} />
       <PhaseInspector event={event} board={board} />
+    </div>
+  );
+}
+
+/** Alert policy: auto-pause can be turned off without turning detection off (the alert then appears as a notice and playback continues). */
+function AutoPauseControls() {
+  const policy = useWorkspace((s) => s.policy);
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1" aria-label="Accident alert settings">
+      <Checkbox label="Pause automatically at a possible accident" checked={policy.autoPause} onChange={() => useWorkspace.getState().setPolicy({ autoPause: !policy.autoPause })} />
+      <label className="t-caption flex items-center gap-2 text-fg-3">Alert on
+        <Select className="h-8" value={policy.minTier} onChange={(e) => useWorkspace.getState().setPolicy({ minTier: e.target.value })} options={[{ value: 'accident', label: 'Possible accidents only' }, { value: 'attention', label: 'Attention events too' }]} />
+      </label>
     </div>
   );
 }
@@ -115,6 +130,11 @@ export default function Workspace() {
   const model = useMemo(() => (data && !data.none ? buildModel({ events, unplaced: data.tl.unplaced, cons: data.cons, crbs: data.crbs, gaps: data.gaps, finds: data.finds, trajs: data.trajs, actors: data.actors, evidence: data.ev, modelRuns: data.runs, jobs: data.jobs, shifts }) : null), [data, events, shifts]);
   const keyEvents = useMemo(() => events.filter(isSignificant), [events]);
   const moment = useMemo(() => (data && !data.none ? pickMoment(events, data.crbs) : null), [data, events]);
+  const placedEvents = useMemo(() => events.filter((e) => e.start_ms != null), [events]);
+  useAutoPause(placedEvents, `${scenarioId}:${primaryId}`);
+  const alertState = useWorkspace((st) => st.alert);
+  const alertEvent = alertState ? model?.events[alertState.eventId] : null;
+  const alertCard = useMemo(() => (alertEvent && board ? board.strips.flatMap((st) => st.items).find((i) => i.event_id === alertEvent.id) : null), [alertEvent, board]);
   const motions = useMotions(moment, data?.trajs || []);
   const executive = useMemo(() => (model ? buildExecutive({ model, moment, motions: motions || [], events, evidence: data.ev, actors: data.actors, trajs: data.trajs, gaps: data.gaps, nameOf: (id) => sourceName((data.ev || []).find((e) => e.id === id)) }) : null), [model, moment, motions, events, data]);
   useEffect(() => { useWorkspace.getState().setIncident(moment ? { ms: moment.ms, trackKeys: moment.trackKeys } : null); }, [moment]);
@@ -182,6 +202,12 @@ export default function Workspace() {
     setAssoc(await api.associations(caseId, scenarioId));
     api.completeness(caseId, scenarioId).then(setComplete).catch(() => {});
   }, [caseId, scenarioId]);
+  const seekToFrame = useCallback((ref) => {
+    const st = useWorkspace.getState();
+    st.setPlaying(false);
+    const shift = shifts[ref.evidence_id];
+    if (shift == null) { st.setPrimaryVideo(ref.evidence_id); st.requestSeek(ref.time_ms); } else st.requestSeek(ref.time_ms - shift);
+  }, [shifts]);
   const seekTo = useCallback((ms) => { const st = useWorkspace.getState(); st.setPlaying(false); st.requestSeek(ms); }, []);
   useEffect(() => {
     setBoard(undefined);
@@ -275,6 +301,10 @@ export default function Workspace() {
           <div className={`grid grid-cols-[minmax(0,1fr)] gap-4 [@media(max-height:1100px)]:h-[calc(100dvh-9.5rem)] [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:overflow-hidden ${navOpen ? 'xl:grid-cols-[250px_minmax(0,1fr)_420px]' : 'xl:grid-cols-[minmax(0,1fr)_420px]'}`}>
             <div className="order-1 min-w-0 space-y-4 xl:order-2 [@media(max-height:1100px)]:flex [@media(max-height:1100px)]:h-full [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-col [@media(max-height:1100px)]:gap-3 [@media(max-height:1100px)]:space-y-0 [@media(max-height:1100px)]:overflow-hidden">
               <Panel as="section" className="p-3 [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-1 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence video">
+                <AccidentAlert alert={alertState} event={alertEvent} events={events} cameraName={alertEvent ? nameOf(alertEvent.source_id) : null} card={alertCard} caseId={caseId}
+                               onOpenFrame={(e) => openTrail('frame', e)} onDetails={(e) => { pick(e); setTab('event'); }} onEvidence={(e) => { pick(e); setTab('evidence'); }}
+                               onResume={() => { const st = useWorkspace.getState(); st.setAlert(null); st.setPlaying(true); }} onDismiss={() => useWorkspace.getState().setAlert(null)} onSeekFrame={seekToFrame} />
+                <AutoPauseControls />
                 <MomentBar moment={moment} />
                 <CameraFilter videos={allVideos} value={camera} onChange={(id) => { setCamera(id); const v = videos.find((x) => x.id === id); if (v) useWorkspace.getState().setPrimaryVideo(id); }} />
                 <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
@@ -289,7 +319,7 @@ export default function Workspace() {
               </Panel>
               <Panel as="section" className="p-3 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${shown.items.length} incident events · ${shown.keyEvents.length} key events of ${events.length} placed · times on the case clock`} className="!mb-3" />
-                <IncidentCards items={shown.items} unplaced={shown.unplaced} activeId={activeId} onSelect={pick} />
+                <IncidentSequence events={shown.keyEvents} unplaced={data.tl.unplaced || []} board={board} activeId={activeId} nameOf={nameOf} caseId={caseId} onSelect={pick} onSeekFrame={seekToFrame} onOpenFrame={(e) => openTrail('frame', e)} />
                 <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
               </Panel>
             </div>
