@@ -296,13 +296,15 @@ export default function Workspace() {
         <h1 className="text-xl font-semibold">{c.title}</h1>
         <DesignationBadge designation={eff.value} />
         <span className="mono t-caption text-fg-3">{c.code}</span>
+      </div>
+      <div className="recon-page-actions" aria-label="Reconstruction controls">
         {scenarios.length > 1 && (
-          <label className="t-caption ml-auto flex items-center gap-2 text-fg-3">Scenario
+          <label className="recon-scenario t-caption text-fg-3"><span>Scenario</span>
             <Select className="h-9" value={scenarioId || ''} onChange={(e) => load(e.target.value)} options={scenarios.map((s) => ({ value: s.id, label: `${s.name}${s.is_baseline ? ' (baseline)' : ''}` }))} />
           </label>
         )}
+        <Button size="sm" variant="outline" onClick={() => showInspector('technical')}>Advanced details</Button>
       </div>
-      <div className="recon-page-actions"><Button size="sm" variant="outline" onClick={() => showInspector('technical')}>Advanced details</Button></div>
       <CaseBanner designation={c.designation} warning={eff.warning} />
       <div className="mb-3"><CaseMeta c={c} /></div>
       <ReconstructionReadiness caseId={caseId} revision={scenarioId} compact onBuilt={s => load(s.id)} />
