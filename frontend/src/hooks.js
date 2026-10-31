@@ -17,3 +17,23 @@ export function useThrottledTime(hz = 8) {
   }, [hz]);
   return t;
 }
+
+import { api } from './api';
+import { describeMotion } from './lib/moment';
+
+/** Image-space motion of the vehicles involved in the possible accident moment, read from their stored track positions. null while loading. */
+export function useMotions(moment, trajs) {
+  const [motions, setMotions] = useState(null);
+  useEffect(() => {
+    setMotions(null);
+    if (!moment || moment.mediaMs == null || !moment.trackIds.length) { setMotions([]); return undefined; }
+    let off = false;
+    const pks = moment.trackIds.map((id) => trajs.find((t) => t.track_ref?.evidence_id === moment.evidenceId && t.track_ref?.track_id === id)?.track_ref?.track_pk);
+    Promise.all(moment.trackIds.slice(0, 4).map((id, i) => (pks[i]
+      ? api.track(pks[i]).then((t) => describeMotion(t, moment.mediaMs)).catch(() => ({ kind: 'unknown', text: `object #${id}: its stored positions could not be read.` }))
+      : Promise.resolve({ kind: 'unknown', text: `object #${id}: no stored trajectory to describe.` }))))
+      .then((r) => { if (!off) setMotions(r); });
+    return () => { off = true; };
+  }, [moment?.eventId]); // eslint-disable-line react-hooks/exhaustive-deps
+  return motions;
+}

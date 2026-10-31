@@ -26,6 +26,8 @@ import CaseBanner from '../components/CaseBanner';
 import CaseMeta from '../components/CaseMeta';
 import IncidentMoment, { MomentBar } from '../components/IncidentMoment';
 import { pickMoment } from '../lib/moment';
+import { buildExecutive } from '../lib/executive';
+import { useMotions } from '../hooks';
 import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
@@ -113,6 +115,8 @@ export default function Workspace() {
   const model = useMemo(() => (data && !data.none ? buildModel({ events, unplaced: data.tl.unplaced, cons: data.cons, crbs: data.crbs, gaps: data.gaps, finds: data.finds, trajs: data.trajs, actors: data.actors, evidence: data.ev, modelRuns: data.runs, jobs: data.jobs, shifts }) : null), [data, events, shifts]);
   const keyEvents = useMemo(() => events.filter(isSignificant), [events]);
   const moment = useMemo(() => (data && !data.none ? pickMoment(events, data.crbs) : null), [data, events]);
+  const motions = useMotions(moment, data?.trajs || []);
+  const executive = useMemo(() => (model ? buildExecutive({ model, moment, motions: motions || [], events, evidence: data.ev, actors: data.actors, trajs: data.trajs, gaps: data.gaps, nameOf: (id) => sourceName((data.ev || []).find((e) => e.id === id)) }) : null), [model, moment, motions, events, data]);
   useEffect(() => { useWorkspace.getState().setIncident(moment ? { ms: moment.ms, trackKeys: moment.trackKeys } : null); }, [moment]);
   const allVideos = useMemo(() => (data?.ev || []).filter((e) => e.kind === 'cctv' || e.kind === 'dashcam' || e.kind === 'other'), [data]);
   const nameOf = useCallback((id) => sourceName((data?.ev || []).find((e) => e.id === id)), [data]);
@@ -293,8 +297,7 @@ export default function Workspace() {
             <Panel as="aside" className="order-2 h-fit min-w-0 p-4 xl:sticky xl:top-20 xl:order-3" aria-label="Inspector">
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
-                {tab === 'overview' && <div className="mb-4"><IncidentMoment moment={moment} events={events} trajs={data.trajs} nameOf={nameOf} /></div>}
-                {tab === 'overview' && <Overview model={model} designation={eff.value} activeId={activeId} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
+                {tab === 'overview' && <Overview model={model} executive={executive} moment={moment} motions={motions} events={events} designation={eff.value} activeId={activeId} nameOf={nameOf} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onPick={pick} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
                 {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} board={board} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />

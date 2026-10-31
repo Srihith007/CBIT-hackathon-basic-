@@ -150,7 +150,30 @@ describe('finding structure', () => {
     const m = buildModel({ evidence: [{ id: 'v', kind: 'cctv' }], actors: [], modelRuns: { v: [{ id: 'r', stage: 'detect', model_id: 'oracle:synthetic-world', status: 'completed', started_at: '2026-01-01', metrics: { boxes: 5 } }] } });
     wrap(<Overview model={m} designation="synthetic" onSelectFinding={vi.fn()} onSeeAll={vi.fn()} />);
     expect(screen.getByText('Imported boxes, not detector output')).toBeInTheDocument();
-    expect(screen.getByText('No significant findings were produced from the current data.')).toBeInTheDocument();
+    expect(screen.getByText(/has not produced any tracked road users/)).toBeInTheDocument();
     expect(screen.getByText('Nothing is flagged for immediate review.')).toBeInTheDocument();
+  });
+});
+
+describe('executive overview', () => {
+  const ev = (id, o = {}) => ({ id, category: 'machine_detection', event_type: 'possible_collision', title: `t ${id}`, start_ms: 4600, end_ms: 4600, uncertainty_ms: 100, source_type: 'video_cctv', source_id: 'ev1', observations: { track_ids: [3] }, provenance: {}, ...o });
+  it('opens with What happened, folds raw data away, and expands a factor into its evidence', async () => {
+    const evidence = [{ id: 'ev1', kind: 'cctv' }];
+    const events = [ev('c1'), ev('b1', { event_type: 'hard_braking', source_type: 'sensor', source_id: 'imu', start_ms: 4000, title: 'Braking recorded' })];
+    const model = buildModel({ events, unplaced: [], cons: [], crbs: [], gaps: [], finds: [], trajs: [], actors: [], evidence, modelRuns: { ev1: [{ id: 'r', stage: 'detect', model_id: 'yolo26s', status: 'completed', started_at: '2026', metrics: {} }] }, jobs: [] });
+    const { pickMoment } = await import('../lib/moment');
+    const { buildExecutive } = await import('../lib/executive');
+    const moment = pickMoment(events, []);
+    const executive = buildExecutive({ model, moment, motions: [], events, evidence, actors: [], trajs: [], gaps: [], nameOf: () => 'North' });
+    wrap(<Overview model={model} executive={executive} moment={moment} motions={[]} events={events} designation="real" nameOf={() => 'North'} onSelectFinding={vi.fn()} onSeeAll={vi.fn()} onPick={vi.fn()} onOpenTrail={vi.fn()} onTechnical={vi.fn()} />);
+    expect(screen.getByText('What happened?')).toBeInTheDocument();
+    const raw = screen.getByText('Raw analysis data').closest('details');
+    expect(raw).not.toHaveAttribute('open');
+    const factor = screen.getByRole('button', { name: /A vehicle sensor recorded a related signal/ });
+    expect(factor).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(factor);
+    expect(factor).toHaveAttribute('aria-expanded', 'true');
+    expect((await screen.findAllByText('Braking recorded')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Verification:/)).toBeInTheDocument();
   });
 });

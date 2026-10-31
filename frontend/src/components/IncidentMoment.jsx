@@ -1,28 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { AlertTriangle, Play, Crosshair } from 'lucide-react';
 import { Badge, Button } from '../ui-kit';
-import { api } from '../api';
 import { useWorkspace } from '../store';
 import { formatTime, formatUncertainty } from '../lib/time';
-import { describeMotion, momentBasis, momentLabel, nearbyEvidence } from '../lib/moment';
+import { momentBasis, momentLabel, nearbyEvidence } from '../lib/moment';
 
 const KIND_TONE = { sped_up: 'text-warning', slowed: 'text-fg-2', steady: 'text-fg-2', stationary: 'text-fg-3', unknown: 'text-fg-3' };
 
 /** The possible accident moment, highlighted, with what the stored data shows around it. Image-space motion is relative to each vehicle's own size and the camera;
  *  it is not a real speed. Nothing here says what caused the event. */
-export default function IncidentMoment({ moment, events, trajs, nameOf }) {
-  const [motions, setMotions] = useState(null);
+export default function IncidentMoment({ moment, events, nameOf, motions }) {
   const near = useMemo(() => nearbyEvidence(events, moment), [events, moment]);
-  useEffect(() => {
-    setMotions(null);
-    if (!moment || moment.mediaMs == null || !moment.trackIds.length) { setMotions([]); return undefined; }
-    let off = false;
-    const pks = moment.trackIds.map((id) => trajs.find((t) => t.track_ref?.evidence_id === moment.evidenceId && t.track_ref?.track_id === id)?.track_ref?.track_pk);
-    Promise.all(moment.trackIds.slice(0, 4).map((id, i) => (pks[i] ? api.track(pks[i]).then((t) => describeMotion(t, moment.mediaMs)).catch(() => ({ kind: 'unknown', text: `object #${id}: its stored positions could not be read.` })) : Promise.resolve({ kind: 'unknown', text: `object #${id}: no stored trajectory to describe.` }))))
-      .then((r) => { if (!off) setMotions(r); });
-    return () => { off = true; };
-  }, [moment?.eventId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   if (!moment) {
     return (
       <section aria-label="Possible accident moment" className="rounded-xl border border-line bg-surface p-4">
