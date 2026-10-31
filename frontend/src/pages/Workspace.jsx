@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
+import { Alert, Badge, Button, Checkbox, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
 import { FileText, Film, Gauge, PanelLeftClose, PanelLeftOpen, Users } from 'lucide-react';
 import Shell from '../layout';
 import { api } from '../api';
@@ -26,7 +26,13 @@ import CaseBanner from '../components/CaseBanner';
 import CaseMeta from '../components/CaseMeta';
 import IncidentMoment, { MomentBar } from '../components/IncidentMoment';
 import { pickMoment } from '../lib/moment';
-import { Associations, CameraFilter, ContradictionsAndGaps, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
+import { buildExecutive } from '../lib/executive';
+import { useAutoPause, useMotions } from '../hooks';
+import AccidentAlert from '../components/AccidentAlert';
+import IncidentSequence from '../components/IncidentSequence';
+import CrashCuePanel, { useCueSummaries } from '../components/CrashCue';
+import InvestigationFindings from '../components/InvestigationFindings';
+import { Associations, CameraFilter, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
 const NAV_KEY = 'traceline.nav';
 /** The navigation rail starts collapsed on screens narrower than 1600 px so the video stays the main element; the choice is remembered. */
@@ -43,6 +49,19 @@ function EventTab({ event, nameOf, board }) {
       </div>
       <EventClocks event={event} />
       <PhaseInspector event={event} board={board} />
+    </div>
+  );
+}
+
+/** Alert policy: auto-pause can be turned off without turning detection off (the alert then appears as a notice and playback continues). */
+function AutoPauseControls() {
+  const policy = useWorkspace((s) => s.policy);
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1" aria-label="Accident alert settings">
+      <Checkbox label="Pause automatically at a possible accident" checked={policy.autoPause} onChange={() => useWorkspace.getState().setPolicy({ autoPause: !policy.autoPause })} />
+      <label className="t-caption flex items-center gap-2 text-fg-3">Alert on
+        <Select className="h-8" value={policy.minTier} onChange={(e) => useWorkspace.getState().setPolicy({ minTier: e.target.value })} options={[{ value: 'accident', label: 'Possible accidents only' }, { value: 'attention', label: 'Attention events too' }]} />
+      </label>
     </div>
   );
 }
@@ -111,8 +130,16 @@ export default function Workspace() {
   }, [data]);
   const actorLabels = useMemo(() => Object.fromEntries((data?.actors || []).map((a) => [a.id, a.label])), [data]);
   const model = useMemo(() => (data && !data.none ? buildModel({ events, unplaced: data.tl.unplaced, cons: data.cons, crbs: data.crbs, gaps: data.gaps, finds: data.finds, trajs: data.trajs, actors: data.actors, evidence: data.ev, modelRuns: data.runs, jobs: data.jobs, shifts }) : null), [data, events, shifts]);
+  const cues = useCueSummaries(videos, data?.runs);
   const keyEvents = useMemo(() => events.filter(isSignificant), [events]);
   const moment = useMemo(() => (data && !data.none ? pickMoment(events, data.crbs) : null), [data, events]);
+  const placedEvents = useMemo(() => events.filter((e) => e.start_ms != null), [events]);
+  useAutoPause(placedEvents, `${scenarioId}:${primaryId}`);
+  const alertState = useWorkspace((st) => st.alert);
+  const alertEvent = alertState ? model?.events[alertState.eventId] : null;
+  const alertCard = useMemo(() => (alertEvent && board ? board.strips.flatMap((st) => st.items).find((i) => i.event_id === alertEvent.id) : null), [alertEvent, board]);
+  const motions = useMotions(moment, data?.trajs || []);
+  const executive = useMemo(() => (model ? buildExecutive({ model, moment, motions: motions || [], events, evidence: data.ev, actors: data.actors, trajs: data.trajs, gaps: data.gaps, nameOf: (id) => sourceName((data.ev || []).find((e) => e.id === id)) }) : null), [model, moment, motions, events, data]);
   useEffect(() => { useWorkspace.getState().setIncident(moment ? { ms: moment.ms, trackKeys: moment.trackKeys } : null); }, [moment]);
   const allVideos = useMemo(() => (data?.ev || []).filter((e) => e.kind === 'cctv' || e.kind === 'dashcam' || e.kind === 'other'), [data]);
   const nameOf = useCallback((id) => sourceName((data?.ev || []).find((e) => e.id === id)), [data]);
@@ -160,7 +187,7 @@ export default function Workspace() {
   }, [model]);
   const clearFinding = () => useWorkspace.getState().setFinding(null, [], null);
   const review = async (id, status) => {
-    try { await api.review(id, status); toast({ title: status === 'reviewed' ? 'Marked as reviewed' : 'Marked as disputed', type: 'success' }); const f = await api.findings(caseId, scenarioId); setData((d) => ({ ...d, finds: f.items })); }
+    try { await api.review(id, status); toast({ title: status === 'reviewed' ? 'Marked as reviewed' : status === 'disputed' ? 'Marked as disputed' : 'Review reset', type: 'success' }); const f = await api.findings(caseId, scenarioId); setData((d) => ({ ...d, finds: f.items })); }
     catch (e) { toast({ title: 'Could not save the review', description: e.message, type: 'error' }); }
   };
   const stepEvent = useCallback((dir) => {
@@ -178,6 +205,12 @@ export default function Workspace() {
     setAssoc(await api.associations(caseId, scenarioId));
     api.completeness(caseId, scenarioId).then(setComplete).catch(() => {});
   }, [caseId, scenarioId]);
+  const seekToFrame = useCallback((ref) => {
+    const st = useWorkspace.getState();
+    st.setPlaying(false);
+    const shift = shifts[ref.evidence_id];
+    if (shift == null) { st.setPrimaryVideo(ref.evidence_id); st.requestSeek(ref.time_ms); } else st.requestSeek(ref.time_ms - shift);
+  }, [shifts]);
   const seekTo = useCallback((ms) => { const st = useWorkspace.getState(); st.setPlaying(false); st.requestSeek(ms); }, []);
   useEffect(() => {
     setBoard(undefined);
@@ -206,7 +239,7 @@ export default function Workspace() {
   const reviewed = (data.finds || []).filter((f) => f.review_status === 'reviewed').length;
   const analysis = model?.overview.analysis;
 
-  const NavRail = (
+  const NavRail = data.none ? null : (
     <Panel as="nav" className="h-fit p-3" aria-label="Case navigation">
       <div className="mb-2 flex items-center justify-between"><h2 className="t-eyebrow text-fg-3">Investigation</h2><IconButton icon={PanelLeftClose} label="Collapse navigation" size="sm" onClick={toggleNav} /></div>
       <dl className="t-caption space-y-1 rounded-lg bg-surface-2/50 p-2.5 text-fg-3">
@@ -271,10 +304,15 @@ export default function Workspace() {
           <div className={`grid grid-cols-[minmax(0,1fr)] gap-4 [@media(max-height:1100px)]:h-[calc(100dvh-9.5rem)] [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:overflow-hidden ${navOpen ? 'xl:grid-cols-[250px_minmax(0,1fr)_420px]' : 'xl:grid-cols-[minmax(0,1fr)_420px]'}`}>
             <div className="order-1 min-w-0 space-y-4 xl:order-2 [@media(max-height:1100px)]:flex [@media(max-height:1100px)]:h-full [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-col [@media(max-height:1100px)]:gap-3 [@media(max-height:1100px)]:space-y-0 [@media(max-height:1100px)]:overflow-hidden">
               <Panel as="section" className="p-3 [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-1 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence video">
+                <AccidentAlert alert={alertState} event={alertEvent} events={events} cameraName={alertEvent ? nameOf(alertEvent.source_id) : null} card={alertCard} caseId={caseId}
+                               onOpenFrame={(e) => openTrail('frame', e)} onDetails={(e) => { pick(e); setTab('event'); }} onEvidence={(e) => { pick(e); setTab('evidence'); }}
+                               onResume={() => { const st = useWorkspace.getState(); st.setAlert(null); st.setPlaying(true); }} onDismiss={() => useWorkspace.getState().setAlert(null)} onSeekFrame={seekToFrame} />
+                <AutoPauseControls />
                 <MomentBar moment={moment} />
                 <CameraFilter videos={allVideos} value={camera} onChange={(id) => { setCamera(id); const v = videos.find((x) => x.id === id); if (v) useWorkspace.getState().setPrimaryVideo(id); }} />
-                <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
+                <Player cues={cues} videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
                 <p className="t-caption mt-2 text-fg-3" title="Percentages on boxes are the detector's score for that box, not the chance of an event. Nothing is drawn between sampled frames.">Stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Hover for what box labels mean.</p>
+                <div className="mt-3"><CrashCuePanel videos={videos} cues={cues} onSeek={(evId, ms) => seekToFrame({ evidence_id: evId, time_ms: ms })} /></div>
                 <div className="mt-3">
                   <IncidentOverview narrative={narrative} provenance={incident?.provenance} />
                   <HypothesisExplanation data={narrative} nameOf={nameOf} />
@@ -285,7 +323,7 @@ export default function Workspace() {
               </Panel>
               <Panel as="section" className="p-3 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${shown.items.length} incident events · ${shown.keyEvents.length} key events of ${events.length} placed · times on the case clock`} className="!mb-3" />
-                <IncidentCards items={shown.items} unplaced={shown.unplaced} activeId={activeId} onSelect={pick} />
+                <IncidentSequence events={shown.keyEvents} unplaced={data.tl.unplaced || []} board={board} activeId={activeId} nameOf={nameOf} caseId={caseId} onSelect={pick} onSeekFrame={seekToFrame} onOpenFrame={(e) => openTrail('frame', e)} />
                 <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
               </Panel>
             </div>
@@ -293,8 +331,7 @@ export default function Workspace() {
             <Panel as="aside" className="order-2 h-fit min-w-0 p-4 xl:sticky xl:top-20 xl:order-3" aria-label="Inspector">
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
-                {tab === 'overview' && <div className="mb-4"><IncidentMoment moment={moment} events={events} trajs={data.trajs} nameOf={nameOf} /></div>}
-                {tab === 'overview' && <Overview model={model} designation={eff.value} activeId={activeId} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
+                {tab === 'overview' && <Overview model={model} executive={executive} moment={moment} motions={motions} events={events} designation={eff.value} activeId={activeId} nameOf={nameOf} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onPick={pick} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
                 {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} board={board} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />
@@ -313,7 +350,8 @@ export default function Workspace() {
             {navOpen && <div className="order-3 xl:order-1 [@media(max-height:1100px)]:max-h-full [@media(max-height:1100px)]:overflow-y-auto">{NavRail}</div>}
           </div>
 
-          <ContradictionsAndGaps cons={data.cons} crbs={data.crbs} gaps={shown.gaps} nameOf={nameOf} />
+          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
+                              onSeekMedia={(evId, ms) => { window.scrollTo({ top: 0, behavior: 'smooth' }); seekToFrame({ evidence_id: evId, time_ms: ms }); }} />
           <Overlaps overlaps={shown.overlaps} nameOf={nameOf} onSeek={seekTo} />
           <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses || []} completeness={complete} onPickEvent={pickById} />
           <details className="mt-4 rounded-lg border border-line p-3">

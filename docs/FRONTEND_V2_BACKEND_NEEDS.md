@@ -17,3 +17,7 @@ Read against backend `8e5cedc` (migration `0010`). Items the backend now serves 
 | 7 | Report `full` lists every event (hundreds on busy footage) | ~195 KB markdown for a 15 s clip on `main`; consider a cap or grouping. |
 | 8 | `visually_supported_contact` is never emitted by the video rules | A possible collision is amber only; the UI cannot show a stronger state because none exists. |
 | 9 | Rotated video | Boxes are documented as upright; no rotated clip was tested in the UI. |
+| 10 | An event review endpoint (`PATCH /events/{id}/review` with reviewed / relevant / not relevant / inconclusive) recorded in the audit log | Alert decisions are saved in the browser only today. |
+| 11 | An event `tier` (information / attention / possible accident) and its reason from the rules | The frontend derives the tier from event type and the movement-change observation (`lib/alerts.js`). |
+| 12 | On-demand before / event / after keyframe extraction at configurable offsets, with derived thumbnails stored apart from originals | The UI uses the nearest stored 5 fps samples and labels the offset. |
+

@@ -57,52 +57,6 @@ export function KeyObservations({ events, activeId, onSelect, nameOf }) {
   );
 }
 
-const GAP_LABEL = {
-  video_missing_interval: 'Missing interval in the recording',
-  no_camera_calibration: 'No camera calibration',
-  clock_inconsistency: 'Clock relations disagree',
-};
-const gapLabel = (t) => GAP_LABEL[t] || String(t).split('_').join(' ');
-
-/** Gaps are missing evidence, never contradictions. Contradictions and corroborations are listed from the stored scenario only. */
-export function ContradictionsAndGaps({ cons, crbs, gaps, nameOf }) {
-  const none = !cons.length && !crbs.length && !gaps.length;
-  return (
-    <section aria-label="Contradictions and gaps" className="mt-4">
-      <SectionHeader title="Contradictions and gaps" description="A contradiction means two sources describe the same thing differently, not which is wrong. A gap is missing evidence, not a contradiction." className="!mb-2" />
-      {none ? <p className="t-small text-fg-3">No contradiction, corroboration or gap is stored for this scenario.</p> : (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div aria-label="Contradictions">
-            <h3 className="t-eyebrow mb-1.5 text-fg-3">Contradictions ({cons.length})</h3>
-            {cons.length === 0 ? <p className="t-small text-fg-3">None stored.</p> : (
-              <ul className="space-y-2">{cons.map((r) => <li key={r.id} className="rounded-lg border border-line px-3 py-2"><span className="mono t-caption text-fg-3">{r.rule_id}</span> · events {r.event_a}, {r.event_b}<p className="t-small text-fg-2">{r.explanation}</p></li>)}</ul>
-            )}
-          </div>
-          <div aria-label="Corroborations">
-            <h3 className="t-eyebrow mb-1.5 text-fg-3">Corroborations ({crbs.length})</h3>
-            {crbs.length === 0 ? <p className="t-small text-fg-3">None stored. Two files with identical bytes are not independent sources.</p> : (
-              <ul className="space-y-2">{crbs.map((r) => <li key={r.id} className="rounded-lg border border-line px-3 py-2"><span className="mono t-caption text-fg-3">{r.rule_id}</span> · events {r.events.join(', ')}<p className="t-small text-fg-2">{r.explanation}</p></li>)}</ul>
-            )}
-          </div>
-          <div aria-label="Recording gaps">
-            <h3 className="t-eyebrow mb-1.5 text-fg-3">Gaps ({gaps.length})</h3>
-            {gaps.length === 0 ? <p className="t-small text-fg-3">None stored.</p> : (
-              <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                {gaps.map((g) => (
-                  <li key={g.id} className="rounded-lg border border-line px-3 py-2">
-                    <p className="t-small font-medium text-fg">{gapLabel(g.gap_type)}</p>
-                    <p className="t-caption text-fg-3">{g.scope?.evidence_id ? nameOf(g.scope.evidence_id) : 'Case-wide'}{g.scope?.from_ms != null ? ` · media ${formatTime(g.scope.from_ms)} to ${formatTime(g.scope.to_ms)}` : ''}</p>
-                    {g.recommendation && <p className="t-caption text-fg-2">{g.recommendation}</p>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
 
 /** Cross-camera associations are only what the backend recorded. Equal track numbers on two cameras are never shown as one vehicle. */
 export function Associations({ state, nameOf, onAdd, videos = [], disabled }) {
