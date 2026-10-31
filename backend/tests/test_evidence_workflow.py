@@ -137,3 +137,21 @@ def test_entry_order_requires_same_clock_scope_and_distinct_witnesses():
     for patch in [{'group':'other'},{'actor_id':None},{'t_start':None}, {'observations':{**second['observations'],'entry_order_scope':'scene'}}, {'observations':{**second['observations'],'witness_id':'W1'}}]:
         changed=deepcopy(second);changed.update(patch)
         assert not correlate([first,changed],ctx)['contradictions']
+
+
+def test_fall_denial_needs_reviewed_video_same_identity_and_time():
+    from copy import deepcopy
+    from app.services.engine_rules import correlate
+    from app.services.witness import fall_report
+    assert fall_report('The motorcycle never fell during the recording.') == 'denied'
+    assert fall_report('I did not see whether the motorcycle fell.') is None
+    ctx={'actors':{'a':{'label':'Motorcycle A'}},'speeds':{},'sensor_cover':{},'evidence_labels':{}}
+    claim={'id':'claim','category':'witness_claim','event_type':'witness_statement','actor_id':'a','group':'g','t_start':14400,'t_end':18500,'unc':500,
+           'source_type':'witness','camera_kind':'witness','evidence_id':'statement','witness_label':'Demo witness',
+           'observations':{'quote':'The motorcycle never fell.','fall_report':'denied'}}
+    video={'id':'review','category':'direct_observation','event_type':'rider_fall_observed','actor_id':'a','group':'g','t_start':14400,'t_end':14900,'unc':500,
+           'source_type':'video_cctv','camera_kind':'cctv','evidence_id':'video','observations':{'reviewed_by':'reviewer'},'source_ref':{'frames':[432,447]}}
+    assert correlate([claim,video],ctx)['contradictions'][0]['rule_id']=='CON-FALL-DENIAL-01'
+    for patch in [{'actor_id':None},{'group':'other'},{'t_start':20000,'t_end':22000},{'observations':{}}]:
+        changed=deepcopy(video);changed.update(patch)
+        assert not correlate([claim,changed],ctx)['contradictions']

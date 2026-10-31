@@ -111,6 +111,18 @@ def correlate(events: list[dict], ctx: dict) -> dict:
             continue
         o = c["observations"]
         derived = o.get("code_derived_maneuver")
+        # Explicit denial vs an attributed human review of this same actor and interval.
+        if o.get("fall_report") == "denied" and c.get("actor_id"):
+            for v in by_type["rider_fall_observed"]:
+                if v["category"] != "direct_observation" or not v["observations"].get("reviewed_by") or v.get("actor_id") != c["actor_id"] or not near(c, v, 0):
+                    continue
+                out["compared_claims"].add(c["id"])
+                out["contradictions"].append({"rule_id":"CON-FALL-DENIAL-01","event_a":c["id"],"event_b":v["id"],"related":[],"strength":"clear",
+                    "basis":{"witness_quote":o.get("quote"),"video_evidence":v["evidence_id"],"frames":v["source_ref"].get("frames"),
+                             "review_method":"human-reviewed video observation, not an automated fall detector","time_compared":True},
+                    "benign_explanations":["The witness may mean a different rider or interval.","The reviewer-assigned identity or visual interpretation may be incorrect."],
+                    "unresolved_questions":["Do the witness and reviewer mean the same rider and interval?"],
+                    "explanation_template":f"{c['witness_label']} says the motorcycle/rider did not fall. An attributed human review of the linked video records a rider fall in the same time window. Review the cited frames; this does not establish vehicle contact or fault."})
         # CON-ACTION-01 / COR-MANEUVER-01
         if derived in MANEUVER_WORD:
             if not c["actor_id"]:

@@ -81,3 +81,15 @@ Optional synthetic scenarios can be generated with `scripts/build_scenarios.py`.
 `backend/`: FastAPI/PostgreSQL pipeline and rules. `frontend/`: React workspace. `docs/`: architecture and workflows. `research/`: measured results. `data/`: local evidence and weights, excluded from Git.
 
 Integration tests verify the workflow on controlled inputs. Accuracy on arbitrary real accident footage and complex witness language is not established by those tests. See `docs/RISKS_AND_LIMITATIONS.md`.
+
+## Prepared jury cases
+
+The planned collection is **three videos, two cases per video (six total)**. Video 01 is included under `demo-cases/video-01/`: one matching witness case and one conflicting witness case, with identical original footage and simulated sensor CSVs. Generated evidence is labeled and separate from the original video.
+
+After starting the API with video dependencies/weights installed, preload the current pair once:
+
+```sh
+backend/.venv/bin/python backend/scripts/load_jury_cases.py --api http://127.0.0.1:8010/api/v1
+```
+
+Use your API port if different; on Windows use `backend\.venv\Scripts\python.exe`. The importer verifies expected findings and skips already loaded complete case codes. Cases remain in PostgreSQL between app runs. Future pairs can be added without re-entering the prepared cases during the presentation. See `demo-cases/video-01/README.md` for assumptions and the attributed human review used for the fall-denial comparison.

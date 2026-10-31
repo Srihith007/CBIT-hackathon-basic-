@@ -20,7 +20,7 @@ from app.models import (Actor, ActorLink, Camera, Case, Contradiction, Corrobora
 from app.models.engine import ClockRecord, SyncEdge
 from app.config import get_settings
 from app.llm.featherless import FeatherlessClient
-from app.services import audit, engine_rules as rules, geometry, incident, sync
+from app.services import audit, engine_rules as rules, geometry, incident, sync, witness as witness_rules
 from app.services.reconstruction_view import associations_from_links
 from app.services.sources import annotation_edges
 
@@ -37,7 +37,7 @@ TITLES = {
     "possible_collision": "Possible collision between tracked vehicles", "possible_near_miss": "Possible near miss between tracked road users",
     "hard_braking": "Hard braking recorded for {a}", "acceleration_spike": "Sharp acceleration change recorded for {a}",
     "collision_flag": "Collision flag recorded by sensor of {a}", "stop": "{a} stops (sensor)", "heading_change": "Heading change recorded for {a}",
-    "sensor_gap": "Sensor recording gap",
+    "sensor_gap": "Sensor recording gap", "rider_fall_observed": "{a}: rider fall observed (human-reviewed footage)",
 }
 
 
@@ -129,7 +129,8 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
             actor = conf.get(("sensor_source", hint.get("sensor_source"))) or None
             stype, ckind = "sensor", "sensor"
         else:
-            actor = trk_actors[0] if len(trk_actors) == 1 else None
+            reviewed_actor = hint.get("reviewed_actor_id") if se.category == "direct_observation" and (se.source_ref or {}).get("reviewed_by") else None
+            actor = reviewed_actor if reviewed_actor in actors else trk_actors[0] if len(trk_actors) == 1 else None
             stype = "video_cctv" if ev.kind == "cctv" else "video_dashcam"
             ckind = ev.kind
         iv = sync.to_case_interval(lk, se.evidence_id, se.t_start_ms, se.t_end_ms, se.uncertainty_ms)
@@ -172,7 +173,7 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         obs = {"quote": c.source_text, "subject": c.subject, "action": c.action, "direction": c.direction, "time_description": c.time_description,
                "certainty": c.certainty, "location": n.get("location"), "code_derived_maneuver": n.get("code_derived_maneuver"),
                "direction_check": n.get("direction_check"), "hedges": n.get("hedges"), "time_exactness": n.get("time_exactness", "none"),
-               "entry_order_labels": n.get("entry_order_labels"), "entry_order_scope": n.get("entry_order_scope"), "witness_id": w.id, "time_anchor": anchor, "claim_id": c.id, "statement_id": st.id, "extraction_status": c.extraction_status,
+               "entry_order_labels": n.get("entry_order_labels"), "entry_order_scope": n.get("entry_order_scope"), "witness_id": w.id, "time_anchor": anchor, "fall_report": witness_rules.fall_report(c.source_text), "claim_id": c.id, "statement_id": st.id, "extraction_status": c.extraction_status,
                "time_placement": ("investigator-declared source time range; uncertainty retained" if anchor and place else f"placed relative to a collision event from the phrase “{c.time_description}”" if place else "not placed: no usable clock relation or anchored time in the statement")}
         d = {"id": new_id("evt")(), "source_event_id": None, "category": "witness_claim", "event_type": et, "actor_id": actor, "evidence_id": st.evidence_id,
              "source_type": "witness", "camera_kind": "witness", "observations": obs, "synthetic": st.synthetic, "group": place[0] if place else None,

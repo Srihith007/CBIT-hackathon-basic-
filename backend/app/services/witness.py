@@ -167,3 +167,10 @@ def local_candidates(text: str) -> list[dict]:
                                    "entry_order_labels": [order.group(1), order.group(2)] if order else None,
                                    "entry_order_scope": "scene" if re.search(r"\bscene\b", quote, re.I) else "junction" if re.search(r"\bjunction|intersection\b", quote, re.I) else None}})
     return out[:100]
+
+
+def fall_report(quote: str) -> str | None:
+    """Narrow explicit denial; never treat vague words such as 'no accident' as a denial of a rider fall."""
+    if re.search(r"\b(?:motorcycle|rider|bike)\b[^.!?]{0,50}\b(?:never fell|did not fall|didn't fall)\b", quote, re.I):
+        return "denied"
+    return None
