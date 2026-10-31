@@ -76,6 +76,7 @@ export default function Workspace() {
   const [tab, setTab] = useState('overview');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [labelBusy, setLabelBusy] = useState(false);
   const showInspector = (id) => { setTab(id); setAdvancedOpen(true); };
   const [scenarios, setScenarios] = useState([]);
   const [scenarioId, setScenarioId] = useState(null);
@@ -131,9 +132,10 @@ export default function Workspace() {
   const trackActors = useMemo(() => {
     const m = {};
     data?.trajs?.forEach((t) => { if (t.actor_id && t.track_ref) m[`${t.track_ref.evidence_id}:${t.track_ref.track_id}`] = { id: t.actor_id, index: data.actors.findIndex((a) => a.id === t.actor_id) }; });
+    data?.actors?.forEach((a, index) => { const x = a.attributes || {}; if (x.label_origin === 'featherless' && x.evidence_id && x.track_id != null) m[`${x.evidence_id}:${x.track_id}`] = { id: a.id, index }; });
     return m;
   }, [data]);
-  const actorLabels = useMemo(() => Object.fromEntries((data?.actors || []).map((a) => [a.id, a.label])), [data]);
+  const actorLabels = useMemo(() => Object.fromEntries((data?.actors || []).map((a) => [a.id, a.attributes?.ai_suggested_label || a.label])), [data]);
   const model = useMemo(() => (data && !data.none ? buildModel({ events, unplaced: data.tl.unplaced, cons: data.cons, crbs: data.crbs, gaps: data.gaps, finds: data.finds, trajs: data.trajs, actors: data.actors, evidence: data.ev, modelRuns: data.runs, jobs: data.jobs, shifts }) : null), [data, events, shifts]);
   const cues = useCueSummaries(videos, data?.runs);
   const keyEvents = useMemo(() => events.filter(isSignificant), [events]);
@@ -233,6 +235,16 @@ export default function Workspace() {
   }, [activeId, incident, scenarioId, caseId]);
   const toggleNav = () => setNavOpen((o) => { try { localStorage.setItem(NAV_KEY, o ? 'closed' : 'open'); } catch { /* storage unavailable */ } return !o; });
   const openTrail = (kind, ev) => setTrail({ kind, ev });
+  const suggestLabels = async () => {
+    setLabelBusy(true);
+    try {
+      const result = await api.suggestActorLabels(caseId);
+      const actors = await api.actors(caseId);
+      setData((current) => ({ ...current, actors: actors.items }));
+      toast({ title: `${result.items.length} Featherless label suggestion${result.items.length === 1 ? '' : 's'} added`, description: 'Review these suggestions before confirming identity.', type: 'success' });
+    } catch (e) { toast({ title: 'Could not generate Featherless labels', description: e.message, type: 'error' }); }
+    finally { setLabelBusy(false); }
+  };
 
   const crumbs = [{ label: data?.c?.title || 'Workspace' }];
   if (err) return <Shell crumbs={crumbs}><ErrorState title={err.code === 'CASE_NOT_FOUND' ? 'This case does not exist' : 'Could not load the case'} description={err.message} onRetry={() => load()} /></Shell>;
@@ -271,11 +283,11 @@ export default function Workspace() {
           );
         })}
       </ul>
-      <h2 className="t-eyebrow mb-1.5 mt-4 flex items-center gap-1.5 text-fg-3"><Users className="h-3.5 w-3.5" aria-hidden />Vehicles and people</h2>
+      <div className="mb-1.5 mt-4 flex flex-wrap items-center justify-between gap-2"><h2 className="t-eyebrow flex items-center gap-1.5 text-fg-3"><Users className="h-3.5 w-3.5" aria-hidden />Vehicles and people</h2><Button size="sm" variant="outline" loading={labelBusy} onClick={suggestLabels}>Generate AI labels</Button></div>
       {data.actors.length === 0 ? <p className="t-caption text-fg-3">No identities confirmed.</p> : (
         <ul className="space-y-0.5">{data.actors.map((a, i) => (
           <li key={a.id}><button type="button" aria-pressed={selectedActor === a.id} onClick={() => useWorkspace.getState().selectActor(selectedActor === a.id ? null : a.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-2 aria-pressed:bg-accent/10">
-            <i className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ACTOR_COLORS[i % ACTOR_COLORS.length] }} aria-hidden /><span className="t-small flex-1 truncate">{a.label}</span></button></li>
+            <i className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ACTOR_COLORS[i % ACTOR_COLORS.length] }} aria-hidden /><span className="t-small min-w-0 flex-1"><span className="block truncate">{a.attributes?.ai_suggested_label || a.label}</span>{a.attributes?.label_origin === 'featherless' && <span className="t-caption block text-accent-text">AI suggested · {Math.round((a.attributes.confidence || 0) * 100)}%</span>}</span></button></li>
         ))}</ul>
       )}
       <h2 className="t-eyebrow mb-1.5 mt-4 text-fg-3">Key events</h2>
