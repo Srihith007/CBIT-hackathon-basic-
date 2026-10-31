@@ -144,9 +144,9 @@ describe('incident time keeps the stated offset', () => {
     expect(toIncidentAt('', '+05:30')).toBeNull();
     expect(() => toIncidentAt('2026-10-30T10:32', '')).toThrow(/time zone offset/);
   });
-  it('shows a stored value with its own offset, without converting zones', () => {
+  it('shows a stored value as entered, without converting zones', () => {
     expect(splitIncidentAt('2026-10-30T10:32:00+05:30')).toEqual({ local: '2026-10-30T10:32', offset: '+05:30' });
-    expect(formatIncidentAt('2026-10-30T10:32:00+05:30')).toBe('2026-10-30 10:32 (UTC+05:30)');
+    expect(formatIncidentAt('2026-10-30T10:32:00+05:30')).toBe('2026-10-30 10:32');
     expect(formatIncidentAt(null)).toBeNull();
     expect(formatIncidentAt('garbage')).toBeNull();
   });
