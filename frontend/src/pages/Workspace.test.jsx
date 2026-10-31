@@ -7,6 +7,7 @@ import Workspace from './Workspace';
 
 vi.mock('../api', () => ({
   api: {
+    witnesses: vi.fn().mockResolvedValue({items: []}), statements: vi.fn().mockResolvedValue({items: []}),
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
     seek: vi.fn(), incidentEvents: vi.fn(), incidentNarrative: vi.fn(), incidentFrames: vi.fn(), storyboard: vi.fn(), summary: vi.fn(),
@@ -57,40 +58,51 @@ function setup({ hypotheses, designation = 'real', evidence = [video('ev_n', 'No
 let board = { scenario_id: 'scn_1', ordering: 'per_source_media_time', note: 'Cameras are not interleaved.', strips: [], omitted: [] };
 beforeEach(() => { board = { scenario_id: 'scn_1', ordering: 'per_source_media_time', note: 'Cameras are not interleaved.', strips: [], omitted: [] }; vi.clearAllMocks(); localStorage.clear(); useWorkspace.getState().reset('case_1', 'scn_1'); });
 
-describe('reconstruction workspace order', () => {
-  it('lists video, summary, vehicles, key observations, keyframes, timeline, contradictions and gaps, scenarios, then technical details', async () => {
-    const { container } = setup({ assoc: new Error('404'), completeness: new Error('404') });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
-    const order = ['Camera filter', 'Overview', 'Vehicles', 'Key observations', 'Timeline', 'Investigation findings', 'Reconstruction scenarios'];
-    const positions = order.map((name) => {
-      const el = container.querySelector(`[aria-label="${name}"]`);
-      expect(el, name).not.toBeNull();
-      return el;
-    });
-    positions.slice(1).forEach((el, i) => expect(positions[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING, order[i + 1]).toBeTruthy());
-    const details = screen.getByText('Technical details').closest('details');
-    expect(details.open).toBe(false);
-    expect(positions[6].compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+describe('guided reconstruction layout', () => {
+  it('prioritizes video, chapters and a concise moment; advanced tools are on demand', async () => {
+    setup();
+    await screen.findByLabelText('Incident summary');
+    expect(screen.getByLabelText('Evidence video')).toBeInTheDocument();
+    expect(screen.getByLabelText('Incident chapters')).toBeInTheDocument();
+    expect(screen.getByLabelText('This moment')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', {name:'Technical'})).toBeNull();
+    expect(screen.getByLabelText('Detailed timeline').open).toBe(false);
+    fireEvent.click(screen.getByRole('button', {name:'Advanced details'}));
+    expect(await screen.findByRole('dialog', {name:'Advanced investigation'})).toBeInTheDocument();
+    expect(screen.getByRole('tab', {name:'Technical'})).toBeInTheDocument();
   });
 });
+
+async function detailedView() {
+  await screen.findByLabelText('Incident summary');
+  fireEvent.click(screen.getByText('Detailed timeline', {selector:'span'}));
+  fireEvent.click(screen.getByText('Reconstruction assumptions', {selector:'span'}));
+  fireEvent.click(screen.getByText('Key findings & open questions', {selector:'span'}));
+}
+
+async function advancedView() {
+  fireEvent.click(await screen.findByRole('button', {name:'Advanced details'}));
+  await screen.findByRole('dialog', {name:'Advanced investigation'});
+  fireEvent.click(screen.getByText('Model & scene details', {selector:'summary'}));
+}
 
 describe('camera filter', () => {
   it('limits the timeline cards and key observations to one camera and restores them', async () => {
     setup();
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
-    const obs = () => screen.getByLabelText('Key observations');
+    await detailedView();
+    const obs = () => screen.getByLabelText('Incident chapters');
     expect(obs()).toHaveTextContent('North vehicle slows');
     expect(obs()).toHaveTextContent('South vehicle slows');
     fireEvent.click(within(screen.getByRole('group', { name: 'Camera filter' })).getByRole('button', { name: 'South camera' }));
     expect(obs()).not.toHaveTextContent('North vehicle slows');
     expect(obs()).toHaveTextContent('South vehicle slows');
-    expect(screen.queryByRole('button', { name: /North vehicle slows/ })).toBeNull();
+    expect(within(obs()).queryByRole('button', { name: /North vehicle slows/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'All cameras' }));
     expect(obs()).toHaveTextContent('North vehicle slows');
   });
   it('is not offered for a single camera', async () => {
     setup({ evidence: [video('ev_n', 'North camera')] });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     expect(screen.queryByRole('group', { name: 'Camera filter' })).toBeNull();
   });
 });
@@ -98,7 +110,7 @@ describe('camera filter', () => {
 describe('timeline card seeks the existing player', () => {
   it('a card moves the single clock and does not create a second one', async () => {
     setup();
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     fireEvent.click(screen.getAllByRole('button', { name: /South vehicle slows/ })[0]);
     await waitFor(() => expect(useWorkspace.getState().currentMs).toBe(4000));
     expect(useWorkspace.getState().seek.latest).toBeGreaterThan(0);
@@ -130,13 +142,15 @@ describe('hypotheses and scenarios', () => {
 describe('cross-camera association, gaps and sensors', () => {
   it('marks associations as not established when the backend has none, and never matches track numbers', async () => {
     setup({ assoc: { scenario_id: 'scn_1', items: [] } });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     expect(await screen.findByText(/Not established: whether any vehicle appears on more than one camera/)).toBeInTheDocument();
     expect(screen.queryByText(/same vehicle/i)).toBeNull();
   });
   it('shows a stored association as uncertain with no likelihood', async () => {
     setup({ assoc: { scenario_id: 'scn_1', items: [{ id: 'vas_1', status: 'uncertain', tracks: [{ evidence_id: 'ev_n', track_id: 3 }, { evidence_id: 'ev_s', track_id: 3 }], supporting: [{ kind: 'investigator', id: 'x' }], contradicting: [], basis: 'Investigator comparison', probability: null }] } });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     const card = await screen.findByText(/North camera track 3/);
     expect(card).toHaveTextContent('South camera track 3');
     const li = card.closest('li');
@@ -146,7 +160,8 @@ describe('cross-camera association, gaps and sensors', () => {
   });
   it('says the list could not be loaded, and assumes nothing, when the request fails', async () => {
     setup({ assoc: new Error('500') });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     expect(await screen.findByText('Associations could not be loaded')).toBeInTheDocument();
   });
   it('lists a recording gap as missing evidence for the camera it belongs to', async () => {
@@ -158,7 +173,8 @@ describe('cross-camera association, gaps and sensors', () => {
   });
   it('shows Unavailable for the sensor panel when the case has no sensor file', async () => {
     setup();
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     expect(screen.getByLabelText('Sensor panel')).toHaveTextContent('Sensor data: Unavailable');
   });
   it('shows empty contradiction, corroboration and gap states', async () => {
@@ -172,9 +188,9 @@ describe('before, during and after inspector', () => {
     board = { ...board, strips: [{ evidence_id: 'ev_n', items: [{ event_id: 'evt_a', event_type: 'vehicle_slowing', title: 'North vehicle slows', evidence_id: 'ev_n', source_time_ms: [1000, 1200], during_basis: 'samples_inside_interval',
       before: { evidence_id: 'ev_n', frame_id: 1, frame_no: 3, time_ms: 800, thumbnail_url: '/f/1.jpg', full_url: '/f/1f.jpg' }, during: [], after: null, missing: ['during', 'after'] }] }] };
     setup();
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: 'Event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect full event details →' }));
     const box = await screen.findByLabelText('Before, during and after');
     await waitFor(() => expect(within(box).getByAltText('before frame 3 at 800 ms')).toBeInTheDocument());
     expect(within(within(box).getByLabelText('during')).getByText('No stored frame inside this event.')).toBeInTheDocument();
@@ -186,21 +202,21 @@ describe('before, during and after inspector', () => {
   it('says Unavailable, with the backend reason, for an event the storyboard omitted', async () => {
     board = { ...board, omitted: [{ event_id: 'evt_a', reason: 'no_source_time' }] };
     setup();
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: 'Event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect full event details →' }));
     expect(await screen.findByText(/Unavailable: This event has no video source time/)).toBeInTheDocument();
   });
   it('says the storyboard is unavailable when the request fails, and shows no frame', async () => {
     setup();
     api.storyboard.mockRejectedValue(new Error('boom'));
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
   });
   it('shows the clocks and trace the backend stored, and Not established for a null clock', async () => {
     setup({ clocks: { media_ms: [1000, 1200], container_pts_ms: null, wall_clock: null, case_ms: [1000, 1200], synchronized_ms: null }, trace: { source_id: 'ev_n', source_event_id: 'se_1', evidence_ids: ['ev_n'], complete: true } });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: 'Event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect full event details →' }));
     const dl = await screen.findByLabelText('Event clocks');
     expect(dl).toHaveTextContent('1000 to 1200');
     expect(within(dl).getAllByText('Not established')).toHaveLength(3);
@@ -214,7 +230,7 @@ describe('real and synthetic banners in the workspace', () => {
     expect(await screen.findByText('Synthetic demonstration data')).toBeInTheDocument();
     unmount();
     setup({ designation: 'real' });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     expect(screen.queryByText('Synthetic demonstration data')).toBeNull();
   });
 });
@@ -238,7 +254,7 @@ describe('timeline and video share the single player clock', () => {
   beforeEach(stubMedia);
   it('a timeline card seeks the primary video and every related video to its own media time', async () => {
     setup({ playable: true, shifts: { ev_n: 0, ev_s: 500 } });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     await waitFor(() => expect(videoEls().length).toBe(2));
     fireEvent.click(screen.getAllByRole('button', { name: /South vehicle slows/ })[0]);
     await waitFor(() => expect(useWorkspace.getState().seekSettled).toBe(true));
@@ -248,7 +264,7 @@ describe('timeline and video share the single player clock', () => {
   });
   it('does not move a video that has no clock relation, and does not move one whose time is outside the file', async () => {
     setup({ playable: true, shifts: { ev_n: 0, ev_s: 20000 } });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     await waitFor(() => expect(videoEls().length).toBe(2));
     fireEvent.click(screen.getAllByRole('button', { name: /South vehicle slows/ })[0]);
     await waitFor(() => expect(useWorkspace.getState().seekSettled).toBe(true));
@@ -256,7 +272,7 @@ describe('timeline and video share the single player clock', () => {
   });
   it('the latest seek wins: two quick cards leave the clock and the video on the second', async () => {
     setup({ playable: true, shifts: { ev_n: 0, ev_s: 0 } });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     await waitFor(() => expect(videoEls().length).toBe(2));
     fireEvent.click(screen.getAllByRole('button', { name: /North vehicle slows/ })[0]);
     fireEvent.click(screen.getAllByRole('button', { name: /South vehicle slows/ })[0]);
@@ -277,7 +293,7 @@ describe('timeline and video share the single player clock', () => {
 describe('overlap, hypothesis explanation and association actions', () => {
   it('draws an overlap band on the timeline and says plainly when no sources overlap', async () => {
     const { unmount } = setup({ overlaps: [{ evidence_ids: ['ev_n', 'ev_s'], start_ms: 2500, end_ms: 3500, event_ids: [] }] });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
     await waitFor(() => expect(document.querySelectorAll('[data-testid="overlap-band"]').length).toBe(1));
     unmount();
     setup();
@@ -285,6 +301,7 @@ describe('overlap, hypothesis explanation and association actions', () => {
   });
   it('shows the stored hypothesis explanation as hypotheses with the backend note and no probability', async () => {
     setup({ explanation: { items: [{ id: 'evt_h', evidence_class: 'hypothesis', statement: 'The lead vehicle may have braked.', alternatives: ['It may have slowed for traffic.'], premises: ['evt_a'], evidence_ids: ['ev_n'], probability: null }], note: 'Stored rule alternatives with evidence ids. No probability is assigned.' } });
+    await advancedView();
     const box = await screen.findByLabelText('Hypothesis explanation');
     expect(within(box).getByText('Hypothesis')).toBeInTheDocument();
     expect(box).toHaveTextContent('Alternatives: It may have slowed for traffic.');
@@ -296,7 +313,8 @@ describe('overlap, hypothesis explanation and association actions', () => {
     api.tracks.mockImplementation(async (id) => ({ items: [{ track_id: id === 'ev_n' ? 3 : 7, class: 'car' }] }));
     api.addAssociation.mockResolvedValue({ item: { id: 'vas_1' } });
     setup({ assoc: { scenario_id: 'scn_1', items: [] } });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     const form = await screen.findByRole('form', { name: 'Propose association' });
     const submitBtn = within(form).getByRole('button', { name: 'Record as uncertain' });
     expect(submitBtn).toBeDisabled();
@@ -322,7 +340,8 @@ describe('overlap, hypothesis explanation and association actions', () => {
     api.tracks.mockResolvedValue({ items: [{ track_id: 1, class: 'car' }] });
     api.addAssociation.mockRejectedValue(new Error('No track 1 on ev_s'));
     setup({ assoc: { scenario_id: 'scn_1', items: [] } });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     const form = await screen.findByRole('form', { name: 'Propose association' });
     fireEvent.change(within(form).getByLabelText('Camera 1'), { target: { value: 'ev_n' } });
     fireEvent.change(within(form).getByLabelText('Camera 2'), { target: { value: 'ev_s' } });
@@ -335,13 +354,15 @@ describe('overlap, hypothesis explanation and association actions', () => {
   });
   it('offers no association action for a case with a single camera', async () => {
     setup({ evidence: [video('ev_n', 'North camera')], assoc: { scenario_id: 'scn_1', items: [] } });
-    fireEvent.click(await screen.findByText('Technical details'));
+    await advancedView();
+    fireEvent.click(screen.getByText('Technical details'));
     expect(await screen.findByText(/needs tracks from two different videos/)).toBeInTheDocument();
     expect(screen.queryByRole('form', { name: 'Propose association' })).toBeNull();
   });
   it('labels evidence class from the backend and has no leftover not-available messages', async () => {
     setup({ assoc: { scenario_id: 'scn_1', items: [] }, completeness: { scenario_id: 'scn_1', defensible: true, reasons: [], unsupported_hypotheses: [] } });
-    await screen.findByText('No collision or near miss was identified in the analysed evidence.');
+    await detailedView();
+    await advancedView();
     expect(screen.getByLabelText('Key observations')).toHaveTextContent('Derived from detections');
     expect(document.body.textContent).not.toMatch(/Not available from this backend build yet/);
   });

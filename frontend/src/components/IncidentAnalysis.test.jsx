@@ -138,7 +138,11 @@ describe('primary workspace', () => {
     api.associations.mockRejectedValue(new Error('404'));
     api.completeness.mockRejectedValue(new Error('404'));
     page();
-    expect(await screen.findByText('No collision or near miss was identified in the analysed evidence.')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Incident summary')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name:'Advanced details'}));
+    expect(await screen.findByRole('dialog', {name:'Advanced investigation'})).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Model & scene details'));
     expect(screen.getByText('AI narrative is unavailable.')).toBeInTheDocument();
     expect(document.querySelector('[aria-label="Trajectories"]')).toBeNull();
     const details = screen.getByText('Technical details').closest('details');

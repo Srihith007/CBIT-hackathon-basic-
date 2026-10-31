@@ -40,7 +40,7 @@ export default function Evidence({ caseId, evidence }) {
             <Badge variant="neutral">{e.kind}</Badge>
             <span className="t-small">{e.original_filename}</span>
             {e.synthetic && <Badge variant="warning">synthetic</Badge>}
-            <span className="mono t-caption ml-auto text-fg-3" title={e.sha256}>sha256 {e.sha256.slice(0, 12)}…</span>
+            <span className="mono t-caption ml-auto text-fg-3" title={e.sha256}>sha256 {e.sha256 ? `${e.sha256.slice(0, 12)}…` : 'not available'}</span>
           </Card>
         ))}
       </ul>

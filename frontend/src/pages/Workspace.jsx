@@ -1,6 +1,7 @@
+import { ChapterStrip, ThisMoment, storyChapters } from '../components/ReconstructionStory';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, Checkbox, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
+import { Alert, Badge, Button, Checkbox, Drawer, ErrorState, IconButton, LoadingState, SectionHeader, Select, Tabs, useToast } from '../ui-kit';
 import { FileText, Film, Gauge, PanelLeftClose, PanelLeftOpen, Users } from 'lucide-react';
 import Shell from '../layout';
 import { api } from '../api';
@@ -72,6 +73,9 @@ export default function Workspace() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [tab, setTab] = useState('overview');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const showInspector = (id) => { setTab(id); setAdvancedOpen(true); };
   const [scenarios, setScenarios] = useState([]);
   const [scenarioId, setScenarioId] = useState(null);
   const [trail, setTrail] = useState(null);
@@ -82,7 +86,7 @@ export default function Workspace() {
   const [camera, setCamera] = useState('all');
   const [assoc, setAssoc] = useState(undefined);
   const [complete, setComplete] = useState(undefined);
-  const [navOpen, setNavOpen] = useState(readNav);
+  const [navOpen, setNavOpen] = useState(false);
   const selectedActor = useWorkspace((s) => s.selectedActorId);
   const activeId = useWorkspace((s) => s.activeEventId);
   const primaryId = useWorkspace((s) => s.primaryVideoId);
@@ -183,7 +187,7 @@ export default function Workspace() {
     st.setFinding(f.id, ids, f.interval ? { start: f.interval.start, end: f.interval.end } : null);
     if (f.interval) { st.requestSeek(f.interval.at); const first = ids.find((i) => model.events[i]?.start_ms != null); if (first) st.selectEvent(first, f.interval.at); }
     if (f.actorIds?.[0]) st.selectActor(f.actorIds[0]);
-    setTab('findings');
+    showInspector('findings');
   }, [model]);
   const clearFinding = () => useWorkspace.getState().setFinding(null, [], null);
   const review = async (id, status) => {
@@ -239,6 +243,9 @@ export default function Workspace() {
   const reviewed = (data.finds || []).filter((f) => f.review_status === 'reviewed').length;
   const analysis = model?.overview.analysis;
 
+  const chapters = storyChapters(shown.keyEvents, moment?.eventId);
+  const momentEvent = model?.events[activeId] || (moment && model?.events[moment.eventId]) || chapters[0]?.event;
+
   const NavRail = data.none ? null : (
     <Panel as="nav" className="h-fit p-3" aria-label="Case navigation">
       <div className="mb-2 flex items-center justify-between"><h2 className="t-eyebrow text-fg-3">Investigation</h2><IconButton icon={PanelLeftClose} label="Collapse navigation" size="sm" onClick={toggleNav} /></div>
@@ -284,7 +291,7 @@ export default function Workspace() {
   return (
     <Shell crumbs={crumbs} wide actions={<Button as={Link} to={`/reports/${caseId}`} size="sm" variant="outline" icon={FileText}>Report</Button>}>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        {!navOpen && <IconButton icon={PanelLeftOpen} label="Show navigation" variant="outline" size="sm" onClick={toggleNav} />}
+        <span className="t-eyebrow text-accent-text">RECONSTRUCTION</span>
         <h1 className="text-xl font-semibold">{c.title}</h1>
         <DesignationBadge designation={eff.value} />
         <span className="mono t-caption text-fg-3">{c.code}</span>
@@ -294,6 +301,7 @@ export default function Workspace() {
           </label>
         )}
       </div>
+      <div className="recon-page-actions"><Button size="sm" variant="outline" onClick={() => showInspector('technical')}>Advanced details</Button></div>
       <CaseBanner designation={c.designation} warning={eff.warning} />
       <div className="mb-3"><CaseMeta c={c} /></div>
 
@@ -301,37 +309,42 @@ export default function Workspace() {
         <ErrorState title="No reconstruction yet" description="The pipeline has not produced a reconstruction for this case. Open the dashboard to check processing jobs." />
       ) : (
         <>
-          <div className={`tl-reconstruction-grid ${navOpen ? "with-rail" : ""}`}>
-            <div className="tl-reconstruction-media order-1 xl:order-2">
+          <section className="recon-summary" aria-label="Incident summary"><span className="t-eyebrow text-accent-text">INCIDENT SUMMARY</span><p>{executive?.sentences?.[0] || 'Review the recorded events and their evidence.'}</p><div className="flex flex-wrap gap-2"><Badge variant="neutral">{videos.length} recording{videos.length === 1 ? '' : 's'}</Badge><Badge variant="neutral">{data.finds.length} items to review</Badge><Badge variant="neutral">{eff.value}</Badge></div></section>
+          <div className="recon-focus-layout">
+            <div className="recon-video-column">
               <Panel as="section" className="p-5" aria-label="Evidence video">
                 <AccidentAlert alert={alertState} event={alertEvent} events={events} cameraName={alertEvent ? nameOf(alertEvent.source_id) : null} card={alertCard} caseId={caseId}
-                               onOpenFrame={(e) => openTrail('frame', e)} onDetails={(e) => { pick(e); setTab('event'); }} onEvidence={(e) => { pick(e); setTab('evidence'); }}
+                               onOpenFrame={(e) => openTrail('frame', e)} onDetails={(e) => { pick(e); showInspector('event'); }} onEvidence={(e) => { pick(e); showInspector('evidence'); }}
                                onResume={() => { const st = useWorkspace.getState(); st.setAlert(null); st.setPlaying(true); }} onDismiss={() => useWorkspace.getState().setAlert(null)} onSeekFrame={seekToFrame} />
-                <AutoPauseControls />
-                <MomentBar moment={moment} />
+                <details className="recon-playback-options"><summary>Playback & alert settings</summary><div className="pt-3"><AutoPauseControls /><MomentBar moment={moment} /></div></details>
                 <CameraFilter videos={allVideos} value={camera} onChange={(id) => { setCamera(id); const v = videos.find((x) => x.id === id); if (v) useWorkspace.getState().setPrimaryVideo(id); }} />
                 <Player cues={cues} videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
                 <p className="t-caption mt-2 text-fg-3" title="Percentages on boxes are the detector's score for that box, not the chance of an event. Nothing is drawn between sampled frames.">Stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Hover for what box labels mean.</p>
-                <div className="mt-3"><CrashCuePanel videos={videos} cues={cues} onSeek={(evId, ms) => seekToFrame({ evidence_id: evId, time_ms: ms })} /></div>
-                <div className="mt-3">
-                  <IncidentOverview narrative={narrative} provenance={incident?.provenance} />
-                  <HypothesisExplanation data={narrative} nameOf={nameOf} />
-                  <IncidentVehicles actors={data.actors} items={[...shown.items, ...shown.unplaced]} />
-                  <KeyObservations events={shown.keyEvents} activeId={activeId} onSelect={(e) => { pick(e); setTab('overview'); }} nameOf={nameOf} />
-                  <IncidentGallery items={frames} />
-                </div>
               </Panel>
-              <Panel as="section" className="p-5" aria-label="Timeline">
-                <SectionHeader title="Timeline" description={`${shown.items.length} incident events · ${shown.keyEvents.length} key events of ${events.length} placed · times on the case clock`} className="!mb-3" />
+              <ChapterStrip chapters={chapters} activeId={activeId} onPick={(e) => { pick(e); }} />
+              <details className="recon-disclosure" aria-label="Detailed timeline"><summary><span>Detailed timeline</span><small>All recorded events & source clocks</small></summary><div className="recon-disclosure-body">
                 <IncidentSequence events={shown.keyEvents} unplaced={data.tl.unplaced || []} board={board} activeId={activeId} nameOf={nameOf} caseId={caseId} onSelect={pick} onSeekFrame={seekToFrame} onOpenFrame={(e) => openTrail('frame', e)} />
-                <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
-              </Panel>
+                <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={pick} onSeek={seekTo} />
+              </div></details>
             </div>
 
-            <Panel as="aside" className="tl-reconstruction-inspector order-2 h-fit min-w-0 p-5 xl:order-3" aria-label="Inspector">
+            <ThisMoment event={momentEvent} nameOf={nameOf} questions={executive?.questions} onPlay={pick} onDetails={(e) => { pick(e); showInspector('event'); }} onEvidence={(e) => { pick(e); showInspector('evidence'); }} />
+          </div>
+
+          <div className="recon-review-sections">
+          <details className="recon-disclosure"><summary><span>Key findings & open questions</span><small>{data.finds.length} items · conflicts, support & missing evidence</small></summary><div className="recon-disclosure-body">          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
+                              onSeekMedia={(evId, ms) => { window.scrollTo({ top: 0, behavior: 'smooth' }); seekToFrame({ evidence_id: evId, time_ms: ms }); }} />
+</div></details>
+          <details className="recon-disclosure" onToggle={(e) => setSourcesOpen(e.currentTarget.open)}><summary><span>Sources & vehicles</span><small>Recordings, identities & evidence details</small></summary><div className="recon-disclosure-body">{NavRail}{sourcesOpen && <Evidence caseId={caseId} evidence={data.ev} />}</div></details>
+          <details className="recon-disclosure"><summary><span>Reconstruction assumptions</span><small>Compare scenarios & clock relations</small></summary><div className="recon-disclosure-body">          <Overlaps overlaps={shown.overlaps} nameOf={nameOf} onSeek={seekTo} />
+          <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses || []} completeness={complete} onPickEvent={pickById} />
+</div></details>
+          </div>
+          <Drawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} title="Advanced investigation" description="Detailed events, findings, sources and technical records." width="sm:max-w-2xl">
+            <Panel as="aside" className="p-4" aria-label="Inspector">
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
-              <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
-                {tab === 'overview' && <Overview model={model} executive={executive} moment={moment} motions={motions} events={events} designation={eff.value} activeId={activeId} nameOf={nameOf} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onPick={pick} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
+              <div className="mt-5">
+                {tab === 'overview' && <Overview model={model} executive={executive} moment={moment} motions={motions} events={events} designation={eff.value} activeId={activeId} nameOf={nameOf} onSelectFinding={selectFinding} onSeeAll={() => showInspector('findings')} onPick={pick} onOpenTrail={openTrail} onTechnical={() => showInspector('technical')} />}
                 {tab === 'event' && <EventTab event={model.events[activeId]} nameOf={nameOf} board={board} />}
                 {tab === 'findings' && (selected
                   ? <FindingDetail f={selected} events={model.events} onPick={pick} onOpenTrail={openTrail} onReview={review} onBack={clearFinding} />
@@ -347,13 +360,8 @@ export default function Workspace() {
               </div>
             </Panel>
 
-            {navOpen && <div className="tl-reconstruction-rail order-3 xl:order-1">{NavRail}</div>}
-          </div>
 
-          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
-                              onSeekMedia={(evId, ms) => { window.scrollTo({ top: 0, behavior: 'smooth' }); seekToFrame({ evidence_id: evId, time_ms: ms }); }} />
-          <Overlaps overlaps={shown.overlaps} nameOf={nameOf} onSeek={seekTo} />
-          <Scenarios scenarios={scenarios} scenarioId={scenarioId} onSelect={(id) => load(id)} hypotheses={data.tl.hypotheses || []} completeness={complete} onPickEvent={pickById} />
+          <details className="recon-disclosure"><summary>Model & scene details</summary><div className="recon-disclosure-body"><CrashCuePanel videos={videos} cues={cues} onSeek={(evId, ms) => seekToFrame({ evidence_id: evId, time_ms: ms })} /><IncidentOverview narrative={narrative} provenance={incident?.provenance} /><HypothesisExplanation data={narrative} nameOf={nameOf} /><IncidentVehicles actors={data.actors} items={[...shown.items, ...shown.unplaced]} /><KeyObservations events={shown.keyEvents} activeId={activeId} onSelect={pick} nameOf={nameOf} /><IncidentGallery items={frames} /></div></details>
           <details className="mt-4 rounded-lg border border-line p-3">
             <summary className="t-small cursor-pointer text-fg">Technical details</summary>
             <div className="mt-3 space-y-5">
@@ -374,6 +382,7 @@ export default function Workspace() {
               </div>
             </div>
           </details>
+          </Drawer>
         </>
       )}
       <p className="t-caption mt-6 text-fg-3">TraceLine supports an investigation. It does not determine fault or legal responsibility.</p>
