@@ -25,7 +25,7 @@ function seekElement(el, seconds) {
  *  secondary sources follow through the recorded clock offsets: media time = case time + shift. A source with no clock relation
  *  (no entry in `shifts`) is never slaved.
  *  Seeking is latest-wins: each request has an id; only the newest request's completion is acknowledged as settled. */
-export default function Player({ videos, shifts, trackActors, actorLabels, range, events, onSelectEvent }) {
+export default function Player({ cues = {}, videos, shifts, trackActors, actorLabels, range, events, onSelectEvent }) {
   const refs = useRef({});
   const box = useRef(null);
   const raf = useRef(0);
@@ -119,11 +119,11 @@ export default function Player({ videos, shifts, trackActors, actorLabels, range
   return (
     <div ref={box}>
       <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_auto]">
-        <Tile key={primary.id} v={primary} primary setRef={(el) => { refs.current[primary.id] = el; }} shift={shiftOf(primary)} trackActors={trackActors} actorLabels={actorLabels} isClock={master?.id === primary.id} />
+        <Tile key={primary.id} cue={cues[primary.id]} v={primary} primary setRef={(el) => { refs.current[primary.id] = el; }} shift={shiftOf(primary)} trackActors={trackActors} actorLabels={actorLabels} isClock={master?.id === primary.id} />
         {others.length > 0 && (
           <div className="grid grid-cols-2 gap-3 2xl:w-56 2xl:grid-cols-1 2xl:content-start">
             {others.map((v) => (
-              <Tile key={v.id} v={v} setRef={(el) => { refs.current[v.id] = el; }} shift={shiftOf(v)} trackActors={trackActors} actorLabels={actorLabels} onMakePrimary={() => setPrimaryVideo(v.id)} isClock={master?.id === v.id} />
+              <Tile key={v.id} cue={cues[v.id]} v={v} setRef={(el) => { refs.current[v.id] = el; }} shift={shiftOf(v)} trackActors={trackActors} actorLabels={actorLabels} onMakePrimary={() => setPrimaryVideo(v.id)} isClock={master?.id === v.id} />
             ))}
           </div>
         )}
@@ -155,7 +155,7 @@ export default function Player({ videos, shifts, trackActors, actorLabels, range
   );
 }
 
-function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrimary, isClock }) {
+function Tile({ cue, v, setRef, shift, trackActors, actorLabels, primary, onMakePrimary, isClock }) {
   const canvas = useRef(null);
   const video = useRef(null);
   const cache = useRef({ win: -1, items: [] });
@@ -202,6 +202,22 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
     const tf = containTransform(el.videoWidth, el.videoHeight, w, h, v.video.width || el.videoWidth, v.video.height || el.videoHeight);
     sample.boxes.forEach((b) => {
       const r = mapBox(b.bbox, tf);
+      if (b.is_accident_cue) {
+        // weak crash-cue box: red when the cue persists over several frames, thin dashed amber when it is a single frame
+        const persistent = !!cue?.persistentTimes?.has(sample.time_ms);
+        ctx.strokeStyle = persistent ? '#ef4444' : '#f59e0b';
+        ctx.lineWidth = persistent ? 3 : 1.5;
+        ctx.setLineDash(persistent ? [] : [6, 4]);
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+        if (overlays.ids) {
+          ctx.setLineDash([]);
+          ctx.fillStyle = persistent ? '#ef4444' : '#f59e0b';
+          ctx.font = '11px ui-monospace, monospace';
+          const txt = `${persistent ? 'crash cue' : 'isolated cue'} ${Math.round(b.confidence * 100)}% · weak`;
+          ctx.fillText(txt, Math.min(r.x, w - ctx.measureText(txt).width - 2), Math.max(12, r.y - 4));
+        }
+        return;
+      }
       const actor = trackActors[`${v.id}:${b.track_id}`];
       const color = actor ? ACTOR_COLORS[actor.index % ACTOR_COLORS.length] : '#94a3b8';
       const involved = !!incident && incident.trackKeys.includes(`${v.id}:${b.track_id}`) && Math.abs(el.currentTime * 1000 - (incident.ms + (shift ?? 0))) <= 2000;
@@ -220,7 +236,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
       }
       ctx.globalAlpha = 1;
     });
-  }, [overlays, selectedActor, trackActors, actorLabels, v.id, incident, shift]);
+  }, [overlays, selectedActor, trackActors, actorLabels, v.id, incident, shift, cue]);
 
   // redraw on clock changes (coalesced to one frame), seeks, resizes; no free-running loop
   useEffect(() => {

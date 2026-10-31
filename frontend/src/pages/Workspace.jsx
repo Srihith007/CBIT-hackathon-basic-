@@ -30,6 +30,7 @@ import { buildExecutive } from '../lib/executive';
 import { useAutoPause, useMotions } from '../hooks';
 import AccidentAlert from '../components/AccidentAlert';
 import IncidentSequence from '../components/IncidentSequence';
+import CrashCuePanel, { useCueSummaries } from '../components/CrashCue';
 import InvestigationFindings from '../components/InvestigationFindings';
 import { Associations, CameraFilter, EventClocks, EventTrace, HypothesisExplanation, KeyObservations, Overlaps, PhaseInspector, Scenarios, SensorPanelNote, evidenceLabel, sourceName } from '../components/Reconstruction';
 
@@ -129,6 +130,7 @@ export default function Workspace() {
   }, [data]);
   const actorLabels = useMemo(() => Object.fromEntries((data?.actors || []).map((a) => [a.id, a.label])), [data]);
   const model = useMemo(() => (data && !data.none ? buildModel({ events, unplaced: data.tl.unplaced, cons: data.cons, crbs: data.crbs, gaps: data.gaps, finds: data.finds, trajs: data.trajs, actors: data.actors, evidence: data.ev, modelRuns: data.runs, jobs: data.jobs, shifts }) : null), [data, events, shifts]);
+  const cues = useCueSummaries(videos, data?.runs);
   const keyEvents = useMemo(() => events.filter(isSignificant), [events]);
   const moment = useMemo(() => (data && !data.none ? pickMoment(events, data.crbs) : null), [data, events]);
   const placedEvents = useMemo(() => events.filter((e) => e.start_ms != null), [events]);
@@ -308,8 +310,9 @@ export default function Workspace() {
                 <AutoPauseControls />
                 <MomentBar moment={moment} />
                 <CameraFilter videos={allVideos} value={camera} onChange={(id) => { setCamera(id); const v = videos.find((x) => x.id === id); if (v) useWorkspace.getState().setPrimaryVideo(id); }} />
-                <Player videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
+                <Player cues={cues} videos={videos} shifts={shifts} trackActors={trackActors} actorLabels={actorLabels} range={range} events={keyEvents} onSelectEvent={(e) => { pick(e); setTab('overview'); }} />
                 <p className="t-caption mt-2 text-fg-3" title="Percentages on boxes are the detector's score for that box, not the chance of an event. Nothing is drawn between sampled frames.">Stored detections on sampled frames ({analysis ? ANALYSIS_LABEL[analysis.detection].toLowerCase() : ''}). Hover for what box labels mean.</p>
+                <div className="mt-3"><CrashCuePanel videos={videos} cues={cues} onSeek={(evId, ms) => seekToFrame({ evidence_id: evId, time_ms: ms })} /></div>
                 <div className="mt-3">
                   <IncidentOverview narrative={narrative} provenance={incident?.provenance} />
                   <HypothesisExplanation data={narrative} nameOf={nameOf} />
