@@ -64,11 +64,11 @@ export default function Dashboard() {
 
   return (
     <Shell crumbs={[{ label: 'Dashboard' }]}>
-      <PageHeader title={['Investigation', 'workstation']} accentIndex={1} description="Cases, evidence processing and findings that need an investigator's decision."
+      <PageHeader title="Investigation overview" accentIndex={1} description="Cases, evidence processing and findings that need an investigator's decision."
                   actions={<Button as={Link} to="/new" variant="primary" icon={FilePlus2}>New investigation</Button>} />
       <Alert variant="info" className="mb-6" title="Investigation support only">TraceLine organises evidence and shows where sources agree or conflict. It does not determine fault or legal responsibility.</Alert>
 
-      <StatGroup className="mb-8 lg:grid-cols-5">
+      <StatGroup className="mb-10 lg:grid-cols-5">
         {loading ? Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-36 w-full" />) : <>
           <StatCard label="Total cases" value={d.cases.total} icon={FolderOpen} hint={`${cases.filter((c) => c.designation === 'real').length} real · ${cases.filter((c) => c.designation === 'synthetic').length} synthetic`} />
           <StatCard label="Active investigations" value={view.investigating} icon={Activity} hint="not closed" />
@@ -78,7 +78,7 @@ export default function Dashboard() {
         </>}
       </StatGroup>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
+      <div className="tl-dashboard-grid">
         <div className="min-w-0 space-y-6">
           <section aria-label="Recent investigations">
             <SectionHeader title="Recent investigations" description="Real and synthetic cases are kept separate and always labelled." />

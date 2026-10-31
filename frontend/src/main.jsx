@@ -7,7 +7,7 @@ import './index.css';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="dark" storageKey="traceline.theme">
+    <ThemeProvider defaultTheme="ember" storageKey="traceline.theme.v3">
       <ToastProvider>
         <BrowserRouter>
           <LinkProvider component={RouterLink} prop="to">

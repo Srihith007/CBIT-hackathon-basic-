@@ -4,6 +4,7 @@
  * `dark: true` marks themes with dark surfaces (used to derive a readable accent-text).
  */
 export const themes = [
+  { id: 'ember', label: 'TraceLine Ember', description: 'Warm black, signal orange', dark: true, swatch: ['#100D0B', '#191410', '#FF692C'] },
   { id: 'forest', label: 'Forest Light', description: 'Soft, airy, deep green', swatch: ['#EBEEEC', '#FFFFFF', '#1F6B42'] },
   { id: 'paper', label: 'Paper Ink', description: 'Warm beige, hard black edges, blue and magenta', swatch: ['#EDE8E0', '#FFFFFF', '#0073E6'] },
   { id: 'dark', label: 'Graphite', description: 'Near-black, signal cyan', dark: true, swatch: ['#08090B', '#15181C', '#22D3EE'] },

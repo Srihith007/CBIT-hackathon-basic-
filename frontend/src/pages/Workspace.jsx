@@ -301,9 +301,9 @@ export default function Workspace() {
         <ErrorState title="No reconstruction yet" description="The pipeline has not produced a reconstruction for this case. Open the dashboard to check processing jobs." />
       ) : (
         <>
-          <div className={`grid grid-cols-[minmax(0,1fr)] gap-4 [@media(max-height:1100px)]:h-[calc(100dvh-9.5rem)] [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:overflow-hidden ${navOpen ? 'xl:grid-cols-[250px_minmax(0,1fr)_420px]' : 'xl:grid-cols-[minmax(0,1fr)_420px]'}`}>
-            <div className="order-1 min-w-0 space-y-4 xl:order-2 [@media(max-height:1100px)]:flex [@media(max-height:1100px)]:h-full [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-col [@media(max-height:1100px)]:gap-3 [@media(max-height:1100px)]:space-y-0 [@media(max-height:1100px)]:overflow-hidden">
-              <Panel as="section" className="p-3 [@media(max-height:1100px)]:min-h-0 [@media(max-height:1100px)]:flex-1 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Evidence video">
+          <div className={`tl-reconstruction-grid ${navOpen ? "with-rail" : ""}`}>
+            <div className="tl-reconstruction-media order-1 xl:order-2">
+              <Panel as="section" className="p-5" aria-label="Evidence video">
                 <AccidentAlert alert={alertState} event={alertEvent} events={events} cameraName={alertEvent ? nameOf(alertEvent.source_id) : null} card={alertCard} caseId={caseId}
                                onOpenFrame={(e) => openTrail('frame', e)} onDetails={(e) => { pick(e); setTab('event'); }} onEvidence={(e) => { pick(e); setTab('evidence'); }}
                                onResume={() => { const st = useWorkspace.getState(); st.setAlert(null); st.setPlaying(true); }} onDismiss={() => useWorkspace.getState().setAlert(null)} onSeekFrame={seekToFrame} />
@@ -321,14 +321,14 @@ export default function Workspace() {
                   <IncidentGallery items={frames} />
                 </div>
               </Panel>
-              <Panel as="section" className="p-3 [@media(max-height:1100px)]:max-h-[48%] [@media(max-height:1100px)]:shrink-0 [@media(max-height:1100px)]:overflow-y-auto" aria-label="Timeline">
+              <Panel as="section" className="p-5" aria-label="Timeline">
                 <SectionHeader title="Timeline" description={`${shown.items.length} incident events · ${shown.keyEvents.length} key events of ${events.length} placed · times on the case clock`} className="!mb-3" />
                 <IncidentSequence events={shown.keyEvents} unplaced={data.tl.unplaced || []} board={board} activeId={activeId} nameOf={nameOf} caseId={caseId} onSelect={pick} onSeekFrame={seekToFrame} onOpenFrame={(e) => openTrail('frame', e)} />
                 <Timeline tl={shown.tl} gaps={shown.gaps} overlaps={shown.overlaps} onSelect={(e) => { pick(e); if (tab !== 'technical' && tab !== 'findings') setTab('overview'); }} onSeek={seekTo} />
               </Panel>
             </div>
 
-            <Panel as="aside" className="order-2 h-fit min-w-0 p-4 xl:sticky xl:top-20 xl:order-3" aria-label="Inspector">
+            <Panel as="aside" className="tl-reconstruction-inspector order-2 h-fit min-w-0 p-5 xl:order-3" aria-label="Inspector">
               <div className="-mx-1 overflow-x-auto px-1"><Tabs value={tab} onChange={setTab} label="Inspector" items={[{ id: 'overview', label: 'Overview' }, { id: 'event', label: 'Event' }, { id: 'findings', label: 'Findings', count: model.findings.length }, { id: 'evidence', label: 'Evidence' }, { id: 'technical', label: 'Technical' }]} /></div>
               <div className="mt-4 max-h-[calc(100vh-11rem)] overflow-auto pr-1">
                 {tab === 'overview' && <Overview model={model} executive={executive} moment={moment} motions={motions} events={events} designation={eff.value} activeId={activeId} nameOf={nameOf} onSelectFinding={selectFinding} onSeeAll={() => setTab('findings')} onPick={pick} onOpenTrail={openTrail} onTechnical={() => setTab('technical')} />}
@@ -347,7 +347,7 @@ export default function Workspace() {
               </div>
             </Panel>
 
-            {navOpen && <div className="order-3 xl:order-1 [@media(max-height:1100px)]:max-h-full [@media(max-height:1100px)]:overflow-y-auto">{NavRail}</div>}
+            {navOpen && <div className="tl-reconstruction-rail order-3 xl:order-1">{NavRail}</div>}
           </div>
 
           <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}

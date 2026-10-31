@@ -1,101 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AppWindow, Badge, Brand, Button, CompareColumns, CtaBand, FeatureGrid, GradientText, LandingHero, LandingNav, LandingSection, SectionHeading, SiteFooter, StepList } from '../ui-kit';
-import { AlertTriangle, Clock3, FileSearch, GitCompare, Route as RouteIcon, ShieldCheck } from 'lucide-react';
+import { ArrowUpRight, ArrowRight, Play, Layers, Clock3, GitCompare, Route, ShieldCheck, ScanLine } from 'lucide-react';
+import { Brand, Button } from '../ui-kit';
 import { api } from '../api';
-import Timeline from '../components/Timeline';
-
-/** The hero shows the real timeline of the first synthetic demo case, fetched from the API. If there is no case yet it says so. */
-function useDemo() {
-  const [state, setState] = useState({ demo: null, data: null, err: null, done: false });
-  useEffect(() => {
-    (async () => {
-      try {
-        const cases = (await api.cases()).items;
-        const demo = cases.find((c) => /Intersection collision/.test(c.title) && c.designation === 'synthetic') || cases.find((c) => c.designation === 'synthetic');
-        if (!demo) return setState({ demo: null, data: null, err: 'No demo case yet. Run scripts/seed_demo.py to create the synthetic demo cases.', done: true });
-        try {
-          const tl = await api.timeline(demo.id);
-          setState({ demo, data: { tl, caseId: demo.id, title: demo.title }, err: null, done: true });
-        } catch (e) {
-          setState({ demo, data: null, err: e.code === 'NO_RECONSTRUCTION' ? 'The demo case has no reconstruction yet.' : 'The demo timeline could not be read.', done: true });
-        }
-      } catch { setState({ demo: null, data: null, err: 'The API is not reachable. Start the backend on port 8000.', done: true }); }
-    })();
-  }, []);
-  return state;
-}
-
-function LivePreview({ data, err }) {
-  return (
-    <AppWindow title="traceline / demo case · synthetic data">
-      {data ? (
-        <>
-          <p className="t-caption mb-3 text-fg-3">{data.title} · rendered from the API, not an illustration</p>
-          <Timeline tl={data.tl} gaps={[]} compact currentMs={0} onSelect={() => {}} activeId={null} />
-          <Link to={`/reconstruction/${data.caseId}`} className="t-small mt-4 inline-block text-accent-text">Open this case →</Link>
-        </>
-      ) : (
-        <p className="t-small text-fg-2">{err || 'Loading the demo case…'}</p>
-      )}
-    </AppWindow>
-  );
-}
-
+const features = [
+  [Layers, 'Every source. One workspace.', 'Bring dashcam footage, CCTV, witness accounts and sensor records into a single investigation.'],
+  [Clock3, 'Follow the sequence.', 'Explore events on a clock-aware timeline. Inspect the source behind each moment.'],
+  [GitCompare, 'Surface the contradictions.', 'See where accounts disagree, where sources support each other, and what remains missing.'],
+  [Route, 'Make movement visible.', 'Review camera trajectories and calibrated ground-plane paths with their uncertainty.'],
+];
 export default function Landing() {
-  const { demo, data, err } = useDemo();
-  return (
-    <div className="min-h-screen bg-bg text-fg">
-      <LandingNav
-        brand={<Brand name="TraceLine" />}
-        links={[{ label: 'Platform', href: '#platform' }, { label: 'How it works', href: '#how' }, { label: 'Principles', href: '#principles' }]}
-        actions={<Button as={Link} to="/dashboard" size="sm">Launch workspace</Button>}
-      />
-      <LandingHero
-        badge="Investigation support · never a verdict"
-        title={<>Reconstruct the incident.<br /><GradientText>Understand what happened.</GradientText></>}
-        description="TraceLine lines up dashcam and CCTV footage, witness statements and vehicle sensor logs on one timeline, shows where they agree and disagree, and says plainly where evidence is missing."
-        actions={<><Button as={Link} to="/new" size="lg">Start Investigation</Button>{demo ? <Button as={Link} to={`/reconstruction/${demo.id}`} size="lg" variant="outline">View Demo</Button> : <Button size="lg" variant="outline" disabled title={err || 'Looking for a demo case'}>View Demo (no demo case)</Button>}</>}
-        bullets={['Observations kept apart from inferences', 'Uncertainty shown on every time', 'Every statement traces to its evidence', 'Runs on a laptop; no GPU needed']}
-        visual={<LivePreview data={data} err={err} />}
-      />
-      <LandingSection id="platform">
-        <SectionHeading eyebrow="Platform" title="From fragmented evidence to a checkable timeline" description="Each capability is built so an investigator can see why the system says what it says." />
-        <FeatureGrid
-          items={[
-            { icon: Clock3, title: 'Clock-aware timeline', description: 'Sources join one clock only through a recorded relation. Anything else stays visibly separate instead of being guessed into order.' },
-            { icon: GitCompare, title: 'Contradictions and agreement', description: 'Witness claims are compared with video and sensor data for the same confirmed vehicle. Independent agreement is listed too.' },
-            { icon: AlertTriangle, title: 'Gaps, not guesses', description: 'Missing frames, sensor gaps, unsynchronized sources and unconfirmed identities become findings with a suggested next step.' },
-            { icon: RouteIcon, title: 'Trajectories with limits', description: 'Pixel paths for every camera; ground-plane paths only where a camera is calibrated, with per-point uncertainty.' },
-            { icon: FileSearch, title: 'Traceable summaries', description: 'Each event summary separates observations, detections, claims, sensor readings and inferences, with source references.' },
-            { icon: ShieldCheck, title: 'Validated report', description: 'A sixteen-section report that refuses language assigning fault, with a checklist of what was verified.' },
-          ]}
-        />
-      </LandingSection>
-      <LandingSection id="how">
-        <SectionHeading eyebrow="How it works" title="Four steps, each reviewable" />
-        <StepList items={[
-          { title: 'Upload', description: 'Videos, statements and sensor files are stored unchanged with a hash. Originals are never edited.' },
-          { title: 'Extract', description: 'Detections, tracks, claims and sensor events are produced by pinned models and deterministic rules.' },
-          { title: 'Correlate', description: 'Sources are placed on one clock where the relation is known; the rules compare what can be compared.' },
-          { title: 'Review', description: 'The investigator confirms identities, reviews findings and exports the report.' },
-        ]} />
-      </LandingSection>
-      <LandingSection id="principles">
-        <SectionHeading eyebrow="Principles" title="Why this matters" />
-        <CompareColumns
-          left={{ title: 'Fragmented evidence', items: ['Clips and notes in separate folders', 'Clocks that disagree, unnoticed', 'Statements remembered, not checked', 'Gaps discovered late'] }}
-          right={{ title: 'Synchronized reconstruction', items: ['One timeline where relations are known', 'Offsets and uncertainty shown', 'Claims checked against what was recorded', 'Gaps listed with what to obtain next'] }}
-        />
-      </LandingSection>
-      <CtaBand title="Turn fragmented evidence into a clearer timeline." description="The demo cases are synthetic and labelled as such everywhere." actions={<Button as={Link} to="/new" size="lg" variant="outline">Start an investigation</Button>} />
-      <SiteFooter
-        brand={<Brand name="TraceLine" />}
-        description="Evidence reconstruction for investigators. Not a fault-finding system."
-        groups={[{ title: 'Product', links: [{ label: 'Workspace', href: '/dashboard' }] }]}
-        copyright="TraceLine · built for the CBIT Hacktoberfest '26 hackathon · demo data is synthetic"
-        legal={[{ label: 'Investigation support only' }]}
-      />
-    </div>
-  );
+  const [demo, setDemo] = useState(null);
+  useEffect(() => { let active = true; api.cases().then(r => { if (active) setDemo(r.items.find(c => c.designation === 'synthetic')); }).catch(() => {}); return () => { active = false; }; }, []);
+  return <div className="ember-landing">
+    <nav className="ember-nav" aria-label="Main navigation"><Brand name="TraceLine" /><div className="ember-nav-links"><a href="#platform">Platform</a><a href="#workflow">How it works</a><Link to="/cases">Investigations</Link></div><Button as={Link} to="/dashboard" variant="outline">Open workspace <ArrowUpRight size={16} /></Button></nav>
+    <main><section className="ember-hero"><div className="ember-hero-copy"><span className="ember-kicker"><span /> EVIDENCE-LED RECONSTRUCTION</span><h1>Every detail.<br />One clear<br /><em>sequence.</em></h1><p>From fragmented evidence to a traceable story. Reconstruct the incident, understand the movements, and see what the evidence actually supports.</p><div className="ember-actions"><Button as={Link} to="/new" variant="primary" size="lg">Start investigation <ArrowUpRight size={18}/></Button><Button as={Link} to={demo ? `/reconstruction/${demo.id}` : '/cases'} size="lg" variant="outline"><Play size={16}/>{demo ? 'Explore demo' : 'Browse cases'}</Button></div><div className="ember-hero-proof"><ShieldCheck size={16}/><span>Evidence first. Every finding traceable.</span></div></div><div className="ember-visual"><img src="/reconstruction-hero.png" alt="Illustrative vehicle reconstruction at a city intersection at sunset" fetchPriority="high"/><div className="ember-visual-top"><span><ScanLine size={14}/> RECONSTRUCTION LAB</span><span>ILLUSTRATIVE SCENE</span></div><div className="ember-visual-bottom"><div><span className="ember-kicker">CONNECT THE EVIDENCE</span><strong>A clearer view of what happened.</strong></div><span className="ember-orbit"><ArrowUpRight/></span></div></div></section>
+    <div className="ember-capabilities"><span>MULTI-SOURCE INPUT</span><span>TIME-ALIGNED EVENTS</span><span>CONTRADICTION ANALYSIS</span><span>TRACEABLE REPORTS</span></div>
+    <section className="ember-section" id="platform"><div className="ember-section-heading"><div><span className="ember-kicker">THE INVESTIGATION, CONNECTED</span><h2>Less searching.<br /><span>More understanding.</span></h2></div><p>One deliberate workspace for the whole investigation. Follow the evidence from intake to reconstruction, with room to focus on what matters.</p></div><div className="ember-feature-grid">{features.map(([Icon,title,text],i)=><article key={title}><div className="ember-feature-top"><Icon size={26}/><span>0{i+1}</span></div><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+    <section className="ember-workflow ember-section" id="workflow"><div><span className="ember-kicker">FROM SOURCE TO STORY</span><h2>A complex incident.<br /><span>A clear way through.</span></h2><p>Move step by step. Keep originals intact, review extracted events, and check the reconstruction before sharing a report.</p><Button as={Link} to="/new" variant="outline">Create your first case <ArrowRight size={16}/></Button></div><ol>{[['Ingest','Upload footage, witness statements and vehicle records.'],['Extract','Index detections, claims, tracks and sensor events.'],['Connect','Align known clocks and compare sources with confirmed identities.'],['Review','Inspect uncertainty, resolve findings, and export a traceable report.']].map(([title,text],i)=><li key={title}><span>0{i+1}</span><div><h3>{title}</h3><p>{text}</p></div><ArrowUpRight size={18}/></li>)}</ol></section>
+    <section className="ember-principles"><ShieldCheck/><div><h3>Clarity includes what we don’t know.</h3><p>Observations stay separate from inferences. Missing evidence stays visible. TraceLine supports investigation; it does not determine fault.</p></div></section>
+    <section className="ember-cta"><span className="ember-kicker">YOUR NEXT INVESTIGATION</span><h2>Start with the evidence.<br /><span>Build the whole picture.</span></h2><Button as={Link} to="/new" variant="primary" size="lg">Start investigation <ArrowUpRight size={18}/></Button></section></main>
+    <footer className="ember-footer"><Brand name="TraceLine"/><span>Evidence into clarity.</span><small>Investigation support · Never a verdict</small></footer>
+  </div>;
 }

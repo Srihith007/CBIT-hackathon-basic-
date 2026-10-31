@@ -37,16 +37,16 @@ function Frame({ crumbs, wide, children, actions }) {
   const { pathname } = useLocation();
   const palette = useCommandPalette();
   return (
-    <AppShell
-      sidebar={<Sidebar brand={<Brand name="TraceLine" to="/" />} items={NAV} activePath={pathname}
-                        actions={<Button as={Link} to="/new" size="sm" variant="primary" block icon={FilePlus2}>New investigation</Button>}
-                        footer={<div className="space-y-3"><CaseChip /><p className="t-caption text-fg-3">Investigation support. No fault determination.</p></div>} />}
-      topbar={<Topbar brand={<Brand name="TraceLine" to="/" />} breadcrumbs={crumbs} onSearch={palette.open} searchPlaceholder="Jump to a case or action…" right={<>{actions}<ThemeSwitcher align="right" /></>} />}
-      mobileNav={<MobileNav items={NAV} activePath={pathname} />}
-      contentClassName={wide ? 'max-w-none !pt-4 lg:!pt-5 !pb-24 lg:!pb-8' : undefined}
-    >
-      {children}
-    </AppShell>
+    <div className="tl-frame">
+      <a href="#main" className="sr-only focus:not-sr-only">Skip to content</a>
+      <header className="tl-global-header">
+        <Brand name="TraceLine" to="/" />
+        <nav aria-label="Primary" className="tl-global-nav">{NAV.map(item => { const Icon = item.icon; const active = pathname === item.to || pathname.startsWith(`${item.to}/`); return <Link key={item.id} to={item.to} aria-current={active ? 'page' : undefined}><Icon size={16}/><span>{item.label}</span></Link>; })}</nav>
+        <div className="tl-header-actions"><button className="tl-search-button" onClick={palette.open} aria-label="Open command palette"><Search size={17}/><span>Search</span><kbd>⌘ K</kbd></button><ThemeSwitcher align="right" /><Button as={Link} to="/new" variant="primary" size="sm" icon={FilePlus2}>New case</Button></div>
+      </header>
+      <div className="tl-context-bar"><span className="t-eyebrow text-accent-text">INVESTIGATION WORKSPACE</span><div className="tl-context-case"><CaseChip /></div>{actions}</div>
+      <main id="main" className={`tl-page ${wide ? 'tl-page-wide' : ''}`}>{children}</main>
+    </div>
   );
 }
 
