@@ -33,7 +33,7 @@ function reviewOf(id, own, finds) {
 
 const side = (e, nameOf) => (e ? {
   id: e.id, title: e.title || e.event_type, source: e.source_id ? nameOf(e.source_id) : null, sourceId: e.source_id || null,
-  timeMs: e.start_ms ?? null, uncertaintyMs: e.uncertainty_ms ?? null, kind: e.category || null, text: e.description || null,
+  timeMs: e.start_ms ?? null, uncertaintyMs: e.uncertainty_ms ?? null, kind: e.category || null, text: e.observations?.quote || e.description || null,
 } : null);
 
 /** @returns {Array} one flat list of findings, each with the same base fields so cards can share filtering and sorting. */

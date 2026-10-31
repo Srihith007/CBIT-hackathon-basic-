@@ -75,6 +75,8 @@ def _place_claim(norm: dict, anchors: list[dict], desc: str) -> tuple | None:
         if pat.search(desc or ""):
             if not anchors:
                 return None
+            if len({e["group"] for e in anchors}) != 1 or max(e["t_start"] for e in anchors) - min(e["t_start"] for e in anchors) > 3000:
+                return None
             a = min(anchors, key=lambda e: e["t_start"])
             return a["group"], a["t_start"] + lo, a["t_start"] + hi, a["unc"] + 1000
     return None
@@ -149,18 +151,29 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
     # ---- witness claims
     anchors = [e for e in events if e["event_type"] in ("possible_collision", "collision_flag") and e["t_start"] is not None]
     wit_events = []
+    # Superseded hosted extraction runs must not re-enter the timeline.
+    latest_claim_runs = {}
+    for run in db.execute(select(ModelRun).where(ModelRun.case_id == case.id, ModelRun.stage == "extract_claims", ModelRun.status.in_(("completed", "partially_completed"))).order_by(ModelRun.finished_at.desc())).scalars():
+        for claim in db.execute(select(WitnessClaim).where(WitnessClaim.model_run_id == run.id)).scalars():
+            latest_claim_runs.setdefault(claim.statement_id, run.id)
     for c, st, w in db.execute(select(WitnessClaim, WitnessStatement, Witness).join(WitnessStatement, WitnessClaim.statement_id == WitnessStatement.id)
                                .join(Witness, WitnessStatement.witness_id == Witness.id).where(Witness.case_id == case.id,
                                                                                                WitnessClaim.extraction_status.in_(("valid", "repaired", "manual")))):
+        if c.model_run_id and latest_claim_runs.get(c.statement_id) != c.model_run_id:
+            continue
         n = c.normalized or {}
-        place = _place_claim(n, anchors, c.time_description or "")
+        if n.get("review_status") == "excluded":
+            continue
+        anchor = n.get("time_anchor")
+        placed_range = sync.to_case_interval(lk, anchor["evidence_id"], anchor["start_ms"], anchor["end_ms"], anchor["uncertainty_ms"]) if anchor else None
+        place = (placed_range["group"], placed_range["start_ms"], placed_range["end_ms"], placed_range["uncertainty_ms"]) if placed_range else (None if anchor else _place_claim(n, anchors, c.time_description or ""))
         et = n.get("event_type_hint") or "witness_statement"
         actor = conf.get(("claim", c.id))
         obs = {"quote": c.source_text, "subject": c.subject, "action": c.action, "direction": c.direction, "time_description": c.time_description,
                "certainty": c.certainty, "location": n.get("location"), "code_derived_maneuver": n.get("code_derived_maneuver"),
                "direction_check": n.get("direction_check"), "hedges": n.get("hedges"), "time_exactness": n.get("time_exactness", "none"),
-               "claim_id": c.id, "statement_id": st.id, "extraction_status": c.extraction_status,
-               "time_placement": f"placed relative to a collision event from the phrase “{c.time_description}”" if place else "not placed: no exact or anchored time in the statement"}
+               "entry_order_labels": n.get("entry_order_labels"), "entry_order_scope": n.get("entry_order_scope"), "witness_id": w.id, "time_anchor": anchor, "claim_id": c.id, "statement_id": st.id, "extraction_status": c.extraction_status,
+               "time_placement": ("investigator-declared source time range; uncertainty retained" if anchor and place else f"placed relative to a collision event from the phrase “{c.time_description}”" if place else "not placed: no usable clock relation or anchored time in the statement")}
         d = {"id": new_id("evt")(), "source_event_id": None, "category": "witness_claim", "event_type": et, "actor_id": actor, "evidence_id": st.evidence_id,
              "source_type": "witness", "camera_kind": "witness", "observations": obs, "synthetic": st.synthetic, "group": place[0] if place else None,
              "t_start": place[1] if place else None, "t_end": place[2] if place else None, "unc": place[3] if place else 0.0, "rule_id": "WIT-CLAIM-01",
@@ -194,7 +207,7 @@ def build(db: Session, case: Case, scn: ReconstructionScenario, who: str) -> dic
         db.add(Event(id=d["id"], case_id=case.id, scenario_id=scn.id, category=d["category"], event_type=d["event_type"], title=d["title"], actor_id=d["actor_id"],
                      actor_candidates=d["candidates"], start_case_ms=round(d["t_start"]) if synced and d["t_start"] is not None else None,
                      end_case_ms=round(d["t_end"]) if synced and d["t_end"] is not None else None, uncertainty_ms=round(d["unc"]),
-                     uncertainty_basis=("clock_bound+sampling" if synced and d["category"] != "witness_claim" else "witness_phrase" if synced else "unsynchronized"),
+                     uncertainty_basis=("clock_bound+sampling" if synced and d["category"] != "witness_claim" else "investigator_declared_range" if synced and d["observations"].get("time_anchor") else "witness_phrase" if synced else "unsynchronized"),
                      sync_group_id=None, source_type=d["source_type"], source_id=d["evidence_id"], observations=d["observations"] | {"actors": d["observations"].get("actors", [])},
                      confidence=quality, provenance=prov_base | {"source_event_id": d["source_event_id"], "rule_id": d["rule_id"], "model_run_id": d["model_run_id"],
                                                                   "sync_group": d["group"]}, synthetic=d["synthetic"]))
@@ -343,7 +356,7 @@ def _gap_facts(db, case, media, lk, solved, events, tracks_pk, track_rows, conf,
                        "candidates": cand.get(("track", t.id), [])})
     claims = []
     for e in events:
-        if e["category"] != "witness_claim" or e["observations"].get("code_derived_maneuver") is None and e["event_type"] not in ("vehicle_speed_claim", "collision_claim", "vehicle_braked"):
+        if e["category"] != "witness_claim":
             continue
         if e["id"] in corr["compared_claims"]:
             continue

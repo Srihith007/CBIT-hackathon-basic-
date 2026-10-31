@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, SectionHeader, Segmented, Select, useToast } from '../ui-kit';
 import { FileText, FileVideo, Gauge, Layers, Play } from 'lucide-react';
 import Shell from '../layout';
+import ReconstructionReadiness from '../components/ReconstructionReadiness';
+import VehicleMatching from '../components/VehicleMatching';
+import SourceAlignment from '../components/SourceAlignment';
 import CaseBanner from '../components/CaseBanner';
 import DesignationBadge from '../components/DesignationBadge';
 import JobStages from '../components/JobStages';
@@ -89,7 +92,7 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
           {isVideo(e) && e.video?.playback_ready && <Button size="sm" variant="outline" icon={Play} onClick={() => onPreview(e)}>Play preview</Button>}
           <p className="t-caption text-fg-3">Preview plays the stored playback copy. It does not move the workspace clock.</p>
         </div>
-        <dl className="t-small grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5" aria-label="Metadata">
+        <details className="rounded-lg border border-line p-3"><summary className="t-small cursor-pointer font-medium">Original file & metadata</summary><dl className="t-small mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5" aria-label="Metadata">
           <dt className="text-fg-3">Source id</dt><dd className="mono break-all text-fg-2">{e.id}</dd>
           <dt className="text-fg-3">Camera name</dt><dd className="text-fg-2">{e.source?.display_name || NA}</dd>
           <dt className="text-fg-3">Camera type</dt><dd className="text-fg-2">{e.source?.camera_role || NA}</dd>
@@ -113,10 +116,10 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
             <dt className="text-fg-3">Validation</dt>
             <dd className="text-fg-2">{[...(e.validation.errors || []).map((x) => `Error: ${x}`), ...(e.validation.warnings || []).map((x) => `Warning: ${x}`)].map((x, i) => <span key={i} className="block">{x}</span>)}</dd>
           </>}
-        </dl>
+        </dl></details>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <details><summary className="t-small cursor-pointer font-medium">Processing & clock status</summary><div className="mt-4 grid gap-5 lg:grid-cols-2">
         <section aria-label="Processing">
           <SectionHeader title="Processing" />
           <JobStages jobs={jobs} evidenceId={e.id} />
@@ -129,7 +132,7 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
             {clock && <p className="t-caption mt-2 text-fg-3">Declared clock: start {clock.utc_zero || 'not given'} · ± {clock.bound_ms} ms · {clock.basis}{clock.timezone ? ` · ${clock.timezone}` : ''}{clock.used_for_sync ? '' : ' · not used for synchronization'}</p>}
           </section>
         )}
-      </div>
+      </div></details>
 
       {e.kind === 'sensor_csv' && (
         <section aria-label="Sensor columns">
@@ -139,7 +142,7 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
       )}
 
       {isVideo(e) && (
-        <form onSubmit={save} aria-label="Edit source details" className="space-y-3">
+        <details><summary className="t-small cursor-pointer font-medium">Edit source details & recording clock</summary><form onSubmit={save} aria-label="Edit source details" className="mt-4 space-y-3">
           <SectionHeader title="Source details" description="Edit at any time. Original bytes are never changed." />
           <Alert variant="info" title="What is stored where">
             Name, camera type, location text and the recording window are stored beside the file. The file, its name and its hash do not change. A start time, timezone, clock offset and uncertainty are also declared as a clock, and a declared clock is trusted when sources are placed on one timeline. Changes reach the reconstruction when it is next rebuilt.
@@ -160,7 +163,7 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
             </fieldset>
           )}
           <Button type="submit" variant="primary" loading={busy}>Save source details</Button>
-        </form>
+        </form></details>
       )}
     </Card>
   );
@@ -168,6 +171,7 @@ function Detail({ e, jobs, sync, videoCount, others, sensor, caseId, onPreview, 
 
 export default function EvidencePage() {
   const { caseId } = useParams();
+  const [params] = useSearchParams();
   const select = useCaseContext((s) => s.select);
   const [state, setState] = useState({ status: 'loading' });
   const [view, setView] = useState(readView);
@@ -195,7 +199,7 @@ export default function EvidencePage() {
 
   const { c, ev = [], jobs = [], sync, statements = [], sensors = [] } = state;
   const eff = c ? effectiveDesignation(c.designation, ev) : null;
-  const selected = ev.find((e) => e.id === pick) || ev[0] || null;
+  const selected = ev.find((e) => e.id === (pick || params.get('source'))) || ev[0] || null;
   const videoCount = ev.filter(isVideo).length;
   const sources = useMemo(() => ev.map((e) => ({ e, st: isVideo(e) ? syncState(sync, e.id, videoCount) : null })), [ev, sync, videoCount]);
 
@@ -217,6 +221,8 @@ export default function EvidencePage() {
       <p className="t-small mb-3 text-fg-2"><span className="font-medium text-fg">{c.title}</span> <span className="mono text-fg-3">{c.code}</span></p>
       <CaseBanner designation={c.designation} warning={eff.warning} />
 
+      <ReconstructionReadiness caseId={caseId} revision={state} onBuilt={load} />
+      <div id="sources" />
       {ev.length === 0 ? (
         <EmptyState icon={Layers} title="No evidence in this case" description="Upload dashcam or CCTV video, a sensor CSV or a witness statement to begin." action={<Button variant="primary" onClick={() => setAdding(true)}>Add evidence</Button>} />
       ) : (
@@ -256,10 +262,12 @@ export default function EvidencePage() {
         </>
       )}
 
-      <section aria-label="Witness statements" className="mt-6">
+      <SourceAlignment caseId={caseId} evidence={ev} sync={sync} onChanged={load} />
+      <section id="witnesses" aria-label="Witness statements" className="mt-6">
         <SectionHeader title="Witness statements" description="Stored text with extracted claims highlighted. Claims are testimony, not findings." />
-        {statements.length === 0 ? <p className="t-small text-fg-3">No witness statement has been added to this case.</p> : <div className="space-y-3">{statements.map(({ s, label }) => <Statement key={s.id} st={s} label={label} />)}</div>}
+        {statements.length === 0 ? <p className="t-small text-fg-3">No witness statement has been added to this case.</p> : <div className="space-y-3">{statements.map(({ s, label }) => <Statement key={s.id} st={s} label={label} evidence={ev} revision={state.jobs} onChanged={load} />)}</div>}
       </section>
+      <VehicleMatching caseId={caseId} evidence={ev} revision={state} onChanged={load} />
       <section aria-label="Sensor data" className="mt-6">
         <SectionHeader title="Sensor data" />
         {ev.some((e) => e.kind === 'sensor_csv') ? <p className="t-small text-fg-2">{sensors.length} of {ev.filter((e) => e.kind === 'sensor_csv').length} sensor file(s) have a column mapping. Select a sensor file above to map its columns.</p> : <p className="t-small text-fg-3">No sensor file has been uploaded to this case.</p>}

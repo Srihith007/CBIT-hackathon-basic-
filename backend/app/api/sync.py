@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_actor, get_case, get_evidence
 from app.db import get_db
 from app.errors import AppError
-from app.models import Case, ClockRecord, EvidenceFile, SourceEvent, SyncEdge, VideoMetadata
+from app.models import Case, ClockRecord, EvidenceFile, SourceAnnotation, SourceEvent, SyncEdge, VideoMetadata
 from app.services import audit, sync
 
 router = APIRouter(tags=["synchronization"])
@@ -33,6 +33,9 @@ def load_state(db: Session, case_id: str):
               for c in db.execute(select(ClockRecord).where(ClockRecord.case_id == case_id)).scalars()]
     edges = [{"id": e.id, "a_evidence": e.a_evidence, "b_evidence": e.b_evidence, "offset_ms": e.offset_ms, "bound_ms": e.bound_ms, "basis": e.basis, "status": e.status}
              for e in db.execute(select(SyncEdge).where(SyncEdge.case_id == case_id)).scalars()]
+    from app.services.sources import annotation_edges
+    rows = db.execute(select(SourceAnnotation).where(SourceAnnotation.evidence_id.in_([e["id"] for e in evidence]))).scalars()
+    edges += annotation_edges([{k: getattr(a, k) for k in ("evidence_id", "clock_offset_ms", "clock_offset_reference_id")} for a in rows])
     return evidence, clocks, edges
 
 

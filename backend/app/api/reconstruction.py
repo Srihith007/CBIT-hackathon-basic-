@@ -11,7 +11,7 @@ from app.db import get_db
 from app.errors import AppError
 from app.models import (Actor, Case, ClockRecord, Contradiction, Corroboration, Event, EventSummary, EvidenceFile, ExtractedFrame, GapRecord,
                         InvestigationFinding, ReconstructionScenario, SourceAnnotation, SourceEvent, Trajectory, VehicleAssociation, VehicleTrack, VideoMetadata)
-from app.services import audit, engine_rules as rules, incident, reconstruct, sync
+from app.services import audit, engine_rules as rules, incident, reconstruct, sync, readiness
 from app.services.storyboard import build_storyboard
 from app.services.reconstruction_view import clocks_for, completeness, evidence_class, group_index, hypotheses, overlaps, trace_for
 
@@ -61,6 +61,7 @@ def create_scenario(body: ScenarioBody, case: Case = Depends(get_case), db: Sess
         for o in db.execute(select(ReconstructionScenario).where(ReconstructionScenario.case_id == case.id, ReconstructionScenario.id != scn.id)).scalars():
             o.is_baseline = False
     reconstruct.build(db, case, scn, who)
+    scn.assumptions = (scn.assumptions or {}) | {"input_fingerprint": readiness.fingerprint(db, case.id)}
     db.commit()
     return scenario_out(scn) | {"note": NOTE}
 
@@ -406,3 +407,8 @@ def diff(a: str, b: str, case: Case = Depends(get_case), db: Session = Depends(g
     (ca, ra), (cb, rb) = rule_set(sa), rule_set(sb)
     return {"a": sa.id, "b": sb.id, "moved_events": sorted(moved, key=lambda m: m["source_event"]), "contradictions": {"a": ca, "b": cb}, "corroborations": {"a": ra, "b": rb},
             "assumptions_a": scenario_out(sa)["assumptions"], "assumptions_b": scenario_out(sb)["assumptions"]}
+
+
+@router.get("/cases/{case_id}/reconstruction/readiness")
+def reconstruction_readiness(case: Case = Depends(get_case), db: Session = Depends(get_db)) -> dict:
+    return readiness.status(db, case.id)

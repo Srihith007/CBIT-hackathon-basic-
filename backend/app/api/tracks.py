@@ -21,7 +21,7 @@ def _latest_track_run(db: Session, ev: EvidenceFile) -> ModelRun | None:
 def _summary(t: VehicleTrack) -> dict:
     c = t.continuity or {}
     return {"id": t.id, "track_id": t.track_id, "class": t.class_name, "first_frame": t.first_frame, "last_frame": t.last_frame,
-            "first_ms": c.get("first_ms"), "last_ms": c.get("last_ms"), "duration_ms": t.duration_ms, "observations": c.get("observations"),
+            "first_ms": c.get("first_ms", (t.points or [{}])[0].get("time_ms")), "last_ms": c.get("last_ms", (t.points or [{}])[-1].get("time_ms")), "duration_ms": t.duration_ms, "observations": c.get("observations"),
             "mean_confidence": t.mean_confidence, "reliability": c.get("reliability"), "gaps": len(c.get("gaps", [])),
             "flags": c.get("flags", []), "ends_at_frame_border": c.get("ends_at_frame_border"),
             "continuation_candidates": c.get("continuation_candidates", []), "model_run_id": t.model_run_id}

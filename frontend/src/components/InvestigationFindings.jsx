@@ -37,22 +37,24 @@ const Time = ({ ms, basis, unc }) => (ms == null
   ? <span className="t-caption text-fg-3">time not placed</span>
   : <span className="mono t-caption text-fg-2"><Clock size={11} className="mr-1 inline align-[-1px]" aria-hidden />{labelled(ms, basis)}{unc ? ` ±${(unc / 1000).toFixed(2)} s` : ''}</span>);
 
-function Claim({ s, label }) {
+function Claim({ s, label, caseId, onSeek, onPickEvent }) {
   if (!s) return <div className="rounded-lg border border-dashed border-line p-3"><p className="t-caption text-fg-3">{label}: the event record is not available.</p></div>;
   return (
     <div className="min-w-0 rounded-lg border border-line bg-surface p-3">
       <p className="t-eyebrow mb-1 text-fg-3">{label}</p>
       <p className="t-small font-medium text-fg">{s.title}</p>
+      <p className="t-caption mt-1 text-fg-3">{s.kind === 'witness_claim' ? 'Reported by witness' : s.kind === 'inference' ? 'Inferred from evidence' : s.kind === 'machine_detection' ? 'Detected in video · review required' : 'Recorded observation'}</p>
       {s.text && <p className="t-caption mt-1 text-fg-2">{s.text}</p>}
       <p className="t-caption mt-2 flex flex-wrap items-center gap-1.5">{s.source ? <Badge variant="neutral">{s.source}</Badge> : <span className="text-fg-3">source not recorded</span>}<Time ms={s.timeMs} basis="case" unc={s.uncertaintyMs} /></p>
+      <div className="mt-2 flex flex-wrap gap-2">{s.sourceId && caseId && <Link className="t-caption text-accent-text" to={`/evidence/${caseId}?source=${s.sourceId}${s.kind === 'witness_claim' ? '#witnesses' : ''}`}>View source →</Link>}{s.timeMs != null && onSeek && <Button size="sm" variant="ghost" onClick={() => { onPickEvent?.(s.id); onSeek(s.timeMs); }}>Go to moment</Button>}</div>
     </div>
   );
 }
 
-function Body({ f }) {
+function Body({ f, ...context }) {
   if (f.category === 'contradiction') return (
     <>
-      <div className="grid gap-2 md:grid-cols-2"><Claim s={f.sides[0]} label="First source" /><Claim s={f.sides[1]} label="Second source" /></div>
+      <div className="grid gap-2 md:grid-cols-2"><Claim s={f.sides[0]} label="First source" {...context} /><Claim s={f.sides[1]} label="Second source" {...context} /></div>
       <p className="t-small mt-3 text-fg-2"><span className="font-medium text-fg">Why they conflict. </span>{f.explanation}</p>
       <p className="t-caption mt-1 text-fg-3">A contradiction says two sources differ. It does not say which one is wrong.</p>
     </>
@@ -63,7 +65,7 @@ function Body({ f }) {
       <p className="t-caption mt-2 flex flex-wrap items-center gap-1.5 text-fg-3"><Users size={12} aria-hidden />
         {f.independent ? `${f.independentCount} independent sources` : `Not established as independent (${f.independentCount} distinct source${f.independentCount === 1 ? '' : 's'})`}
       </p>
-      <ul className="mt-2 grid gap-2 md:grid-cols-2">{f.sources.map((s) => <li key={s.id}><Claim s={s} label="Supporting source" /></li>)}</ul>
+      <ul className="mt-2 grid gap-2 md:grid-cols-2">{f.sources.map((s) => <li key={s.id}><Claim s={s} label="Supporting source" {...context} /></li>)}</ul>
     </>
   );
   return (
@@ -117,7 +119,7 @@ function FindingCard({ f, caseId, onReview, onSeek, onSeekMedia, onPickEvent, re
         </span>
       </div>
       <h3 className="mb-2 text-[0.9375rem] font-semibold leading-snug text-fg">{f.title}</h3>
-      <Body f={f} />
+      <Body f={f} caseId={caseId} onSeek={onSeek} onPickEvent={onPickEvent} />
       <AnimatePresence initial={false}>
         {open && (
           <motion.div id={panelId} key="d" initial={reduce ? false : { height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }} transition={{ duration: reduce ? 0 : 0.18 }} className="overflow-hidden">

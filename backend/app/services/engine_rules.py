@@ -9,7 +9,7 @@ Nothing here decides which source is right, and nothing states fault.
 import re
 from collections import defaultdict
 
-RULES_VERSION = "1"
+RULES_VERSION = "2"
 TOL_BRAKE_MS = 2000.0
 TOL_COLLISION_MS = 1500.0
 TOL_ACTION_MS = 2000.0
@@ -195,6 +195,49 @@ def correlate(events: list[dict], ctx: dict) -> dict:
             elif not near_miss:
                 out["questions"].append({"text": f"{c['witness_label']} claims contact with a pedestrian, but no video event describes the vehicle and pedestrian together; the claim is untested.",
                                          "refs": [c["id"]], "event": c["id"]})
+
+    # Entry-order disagreements: never equate entering the camera's scene with entering a junction.
+    orders = []
+    for c in events:
+        o = c.get("observations") or {}
+        labels = o.get("entry_order_labels")
+        scope = o.get("entry_order_scope")
+        if c["category"] != "witness_claim" or not labels or not scope:
+            continue
+        def resolve(label):
+            choices = [aid for aid, a in ctx["actors"].items() if re.match(r"^" + re.escape(label) + r"(?:$|\s|[·:(—-])", a["label"], re.I)]
+            return choices[0] if len(choices) == 1 else None
+        first, second = map(resolve, labels)
+        if not first or not second or first == second or c.get("actor_id") != first or span(c) is None:
+            out["questions"].append({"text": "Entry order needs two unambiguous vehicle labels, a confirmed match for the first vehicle and an anchored time range before it can be compared.", "refs": [c["id"]], "event": c["id"]})
+            continue
+        orders.append((c, first, second, scope))
+    for i, (c, first, second, scope) in enumerate(orders):
+        for other, ofirst, osecond, oscope in orders[i+1:]:
+            if first != osecond or second != ofirst or scope != oscope or not near(c, other, 0):
+                continue
+            if c["observations"].get("witness_id") == other["observations"].get("witness_id") or c["evidence_id"] == other["evidence_id"]:
+                continue
+            out["compared_claims"].update([c["id"], other["id"]])
+            out["contradictions"].append({"rule_id": "CON-ORDER-01", "event_a": c["id"], "event_b": other["id"], "related": [], "strength": "clear",
+                "basis": {"first_claim": c["observations"].get("quote"), "second_claim": other["observations"].get("quote"), "scope": scope,
+                          "identity": "confirmed first-vehicle links and unambiguous case vehicle labels", "time_compared": True},
+                "benign_explanations": ["The witnesses may mean different entry boundaries or different passes through the scene.", "Vehicle identity decisions could be incorrect."],
+                "unresolved_questions": ["Do both witnesses mean the same entry boundary and the same pass?", "Does footage cover that boundary?"],
+                "explanation_template": f"{c['witness_label']} reports {_lab(ctx, first)} before {_lab(ctx, second)}; {other['witness_label']} reports the reverse at the {scope} in overlapping time ranges. Neither account is established as correct."})
+        if scope != "scene":
+            continue
+        entries = [e for e in by_type["vehicle_enters_scene"] if e["source_type"] in ("video_cctv", "video_dashcam") and e["group"] == c["group"] and near(c, e, 0)]
+        for a in [e for e in entries if e["actor_id"] == first]:
+            b = next((e for e in entries if e["actor_id"] == second and e["evidence_id"] == a["evidence_id"]), None)
+            if not b or span(b)[1] >= span(a)[0]:
+                continue
+            out["compared_claims"].add(c["id"])
+            out["contradictions"].append({"rule_id": "CON-ORDER-VIDEO-01", "event_a": c["id"], "event_b": a["id"], "related": [b["id"]], "strength": "marginal",
+                "basis": {"witness_quote": c["observations"].get("quote"), "scope": "camera scene only", "first_observed": b["id"], "later_observed": a["id"], "time_compared": True},
+                "benign_explanations": ["A track can start late because of occlusion or missed detection.", "The witness may mean a different scene boundary."],
+                "unresolved_questions": ["Do the first detections correspond to actual scene entry?"],
+                "explanation_template": f"{c['witness_label']} reports {_lab(ctx, first)} entered the scene first. The same camera first tracked {_lab(ctx, second)} earlier, outside timestamp uncertainty. First detection is not proof of actual entry."})
 
     # ---- inferences (registered rules; never premises for other inferences)
     colls = by_type["possible_collision"] + by_type["collision_flag"]

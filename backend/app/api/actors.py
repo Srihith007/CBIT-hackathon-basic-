@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_actor, get_case
 from app.db import get_db
 from app.errors import AppError
-from app.models import Actor, ActorLink, Case
+from app.models import Actor, ActorLink, Case, VehicleTrack, EvidenceFile, SensorSource, WitnessClaim, WitnessStatement, Witness
 from app.services import audit
 
 router = APIRouter(tags=["actors"])
@@ -53,16 +53,38 @@ class LinkCreate(BaseModel):
     basis: dict = Field(default_factory=dict)
 
 
+def validate_reference(db, a, ref_type, ref_id):
+    if ref_type == "track":
+        row = db.get(VehicleTrack, ref_id)
+        ev = db.get(EvidenceFile, row.evidence_id) if row else None
+        case_id = ev.case_id if ev else None
+    elif ref_type == "sensor_source":
+        row = db.get(SensorSource, ref_id)
+        case_id = row.case_id if row else None
+    else:
+        row = db.get(WitnessClaim, ref_id)
+        st = db.get(WitnessStatement, row.statement_id) if row else None
+        w = db.get(Witness, st.witness_id) if st else None
+        case_id = w.case_id if w else None
+    if case_id != a.case_id:
+        raise AppError(422, "INVALID_IDENTITY_REFERENCE", "Choose evidence from this case")
+
+
 @router.post("/actors/{actor_id}/links", status_code=201)
 def add_link(actor_id: str, body: LinkCreate, db: Session = Depends(get_db), who: str = Depends(get_actor)) -> dict:
     """Identity decisions. 'confirmed' is an investigator's decision and is audited; contradiction rules use confirmed links only."""
     a = db.get(Actor, actor_id)
     if a is None:
         raise AppError(404, "ACTOR_NOT_FOUND", f"No actor with id {actor_id}")
+    validate_reference(db, a, body.ref_type, body.ref_id)
     existing = db.execute(select(ActorLink).where(ActorLink.ref_type == body.ref_type, ActorLink.ref_id == body.ref_id,
                                                   ActorLink.status == "confirmed")).scalars().first()
     if existing and body.status == "confirmed" and existing.actor_id != a.id:
         raise AppError(409, "ALREADY_CONFIRMED", "This reference is already confirmed for another actor")
+    same = db.execute(select(ActorLink).where(ActorLink.actor_id == a.id, ActorLink.ref_type == body.ref_type,
+                                             ActorLink.ref_id == body.ref_id, ActorLink.status == body.status)).scalars().first()
+    if same:
+        return link_out(same)
     link = ActorLink(actor_id=a.id, ref_type=body.ref_type, ref_id=body.ref_id, status=body.status, basis=body.basis or {"source": "investigator"})
     if body.status == "confirmed":
         from datetime import datetime, timezone
@@ -81,6 +103,12 @@ def decide_link(link_id: str, decision: Literal["confirm", "reject"], db: Sessio
     link = db.get(ActorLink, link_id)
     if link is None:
         raise AppError(404, "LINK_NOT_FOUND", f"No link with id {link_id}")
+    if decision == "confirm":
+        validate_reference(db, db.get(Actor, link.actor_id), link.ref_type, link.ref_id)
+        other = db.execute(select(ActorLink).where(ActorLink.ref_type == link.ref_type, ActorLink.ref_id == link.ref_id,
+                                                  ActorLink.status == "confirmed", ActorLink.actor_id != link.actor_id)).scalars().first()
+        if other:
+            raise AppError(409, "ALREADY_CONFIRMED", "This reference is already confirmed for another actor")
     link.status = "confirmed" if decision == "confirm" else "rejected"
     link.decided_by, link.decided_at = who, datetime.now(timezone.utc)
     audit.record(db, actor=who, action=f"actor_link_{link.status}", case_id=db.get(Actor, link.actor_id).case_id, target_type="actor_link", target_id=link.id)

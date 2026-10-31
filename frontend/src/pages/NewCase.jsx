@@ -48,9 +48,9 @@ function Details({ initial, onCreated }) {
   return (
     <Card as="form" onSubmit={submit} className="space-y-4" aria-label="Create investigation">
       <Field label="Case title"><Input required value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} disabled={busy} /></Field>
-      <Field label="What is this footage?" hint="Real and synthetic evidence never share a case.">
+      <Field label="What is this footage?" hint="Use a mixed demo when combining recorded footage with simulated records.">
         <Select value={f.designation} onChange={(e) => setF({ ...f, designation: e.target.value })} disabled={busy}
-                options={[{ value: 'real', label: 'Real incident footage' }, { value: 'staged', label: 'Staged / recreated' }, { value: 'synthetic', label: 'Synthetic / generated' }]} />
+                options={[{ value: 'real', label: 'Real incident footage' }, { value: 'staged', label: 'Staged / recreated' }, { value: 'synthetic', label: 'Synthetic / generated' }, { value: 'mixed', label: 'Mixed demo · recorded footage + simulated records' }]} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Incident date and time" optional hint="The time you state. It is not read from any file and is not used to pick frames."><Input type="datetime-local" value={f.incident_at} onChange={(e) => setF({ ...f, incident_at: e.target.value })} disabled={busy} /></Field>
@@ -101,7 +101,12 @@ function Processing({ c }) {
     if (built.current) return;
     built.current = true;
     setPhase('building');
-    try { await api.buildScenario(c.id, { name: 'Baseline' }); nav(`/reconstruction/${c.id}`); } catch (x) { built.current = false; setErr(x.message); setPhase('failed'); }
+    try {
+      const ready = await api.readiness(c.id);
+      if (!ready.can_build || ready.checks.some(check => !check.ready)) { nav(`/evidence/${c.id}`); return; }
+      const scenario = await api.buildScenario(c.id, { name: 'Baseline' });
+      nav(scenario.build?.events ? `/reconstruction/${c.id}` : `/evidence/${c.id}`);
+    } catch (x) { built.current = false; setErr(x.message); setPhase('failed'); }
   }, [c.id, nav]);
   useEffect(() => { if (phase === 'ready') build(); }, [phase, build]);
 
@@ -141,7 +146,7 @@ export default function NewCase() {
   const [step, setStep] = useState(params.get('case') ? 1 : 0);
   const [err, setErr] = useState(null);
   const [dups, setDups] = useState([]);
-  const initial = { title: params.get('title') || '', designation: ['real', 'staged', 'synthetic'].includes(params.get('designation')) ? params.get('designation') : 'real' };
+  const initial = { title: params.get('title') || '', designation: ['real', 'staged', 'synthetic', 'mixed'].includes(params.get('designation')) ? params.get('designation') : 'real' };
 
   useEffect(() => {
     const id = params.get('case');

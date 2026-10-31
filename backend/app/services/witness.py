@@ -135,3 +135,35 @@ def direction_check(model_direction: str | None, derived: str | None) -> str:
     if not said:
         return "not_comparable"
     return "agrees" if said == [derived] else "differs"
+
+
+# Local fallback: extracts only recognized sentences, never invents missing actors or timestamps.
+def local_candidates(text: str) -> list[dict]:
+    out = []
+    for match in re.finditer(r"[^\n]+?(?:[.!?](?=\s|$)|(?=\n)|$)", text):
+        raw = match.group()
+        quote = raw.strip()
+        if not quote or len(quote) > 2000:
+            continue
+        hint = event_type_hint(ClaimCandidate(source_text=quote))
+        order = re.search(r"\b(vehicle\s+[A-Z0-9]+)\s+(?:entered|arrived|crossed).*?\bbefore\s+(vehicle\s+[A-Z0-9]+)\b", quote, re.I)
+        if not hint and not order:
+            continue
+        start = match.start() + len(raw) - len(raw.lstrip())
+        subject = re.search(r"\b(?:vehicle\s+[A-Z0-9]+|(?:blue|red|white|black|silver|orange)\s+(?:car|truck|van|bus)|(?:the|a)\s+(?:car|truck|van|bus|pedestrian))\b", quote, re.I)
+        tm = re.search(r"\b(?:(?:just |right |shortly )?(?:before|after|following) (?:the )?(?:collision|crash|impact|accident)|at the (?:moment|instant))\b", quote, re.I)
+        time = tm.group() if tm else None
+        direction = derive_maneuver(quote)
+        if re.search(r"\b(?:did not|didn't|never)\s+(?:hit|collide|crash|brake|stop)\b", quote, re.I):
+            hint = "witness_statement"  # Keep the quote; a denied action is not a positive event.
+        hedges = [m.group() for m in re.finditer(r"\b(?:I think|maybe|perhaps|possibly|not sure)\b", quote, re.I)]
+        out.append({"char_start": start, "char_end": start + len(quote), "source_text": quote,
+                    "subject": subject.group() if subject else None, "direction": direction, "time_description": time,
+                    "certainty": "hedged" if hedges else "reported_as_direct_observation",
+                    "normalized": {"event_type_hint": "entry_order_claim" if order else hint,
+                                   "code_derived_maneuver": direction, "direction_check": "agrees" if direction else "not_comparable",
+                                   "time_exactness": "approximate" if time else "none", "hedges": hedges,
+                                   "interpretation_by": "local keyword extraction v1; investigator review required",
+                                   "entry_order_labels": [order.group(1), order.group(2)] if order else None,
+                                   "entry_order_scope": "scene" if re.search(r"\bscene\b", quote, re.I) else "junction" if re.search(r"\bjunction|intersection\b", quote, re.I) else None}})
+    return out[:100]

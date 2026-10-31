@@ -7,6 +7,7 @@ import Workspace from './Workspace';
 
 vi.mock('../api', () => ({
   api: {
+    readiness: vi.fn().mockResolvedValue({ checks: [], failed_jobs: [], can_build: true, scenario_id: 'scn_1', needs_update: false }),
     witnesses: vi.fn().mockResolvedValue({items: []}), statements: vi.fn().mockResolvedValue({items: []}),
     cases: vi.fn(), case: vi.fn(), evidence: vi.fn(), actors: vi.fn(), scenarios: vi.fn(), timeline: vi.fn(),
     contradictions: vi.fn(), corroborations: vi.fn(), gaps: vi.fn(), findings: vi.fn(), trajectories: vi.fn(),
@@ -372,6 +373,6 @@ describe('a case with no reconstruction', () => {
   it('shows an honest empty state instead of crashing (regression: the navigation rail read missing data)', async () => {
     setup({ scenarios: [] });
     expect(await screen.findByText('No reconstruction yet')).toBeInTheDocument();
-    expect(document.body.textContent).toMatch(/has not produced a reconstruction/);
+    expect(document.body.textContent).toMatch(/Review evidence setup/);
   });
 });

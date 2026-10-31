@@ -9,21 +9,26 @@ env=os.environ.copy()
 env['PATH']=str(work/'media-runtime/node_modules/@ffmpeg-installer/darwin-arm64')+os.pathsep+str(work/'media-runtime/node_modules/@ffprobe-installer/darwin-arm64')+os.pathsep+env['PATH']
 env['MPLCONFIGDIR']=str(runtime/'matplotlib')
 env['YOLO_CONFIG_DIR']=str(runtime/'ultralytics')
-env['TRACELINE_API_URL']='http://127.0.0.1:8010'
+api_port=int(os.environ.get('TRACELINE_API_PORT','8010'))
+frontend_port=int(os.environ.get('TRACELINE_FRONTEND_PORT','5176'))
+env['TRACELINE_API_URL']=f'http://127.0.0.1:{api_port}'
 def listening(port):
     with socket.socket() as s:return s.connect_ex(('127.0.0.1',port))==0
 if not listening(55432):
     raise SystemExit('PostgreSQL is stopped. Run bash start-local.sh first.')
 pids={}
-for name,port,cwd,cmd in [('backend',8010,root/'backend',[str(root/'backend/.venv/bin/python'),'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8010']),('frontend',5176,root/'frontend',['npm','run','dev','--','--host','127.0.0.1','--port','5176','--strictPort'])]:
+for name,port,cwd,cmd in [('backend',api_port,root/'backend',[str(root/'backend/.venv/bin/python'),'-m','uvicorn','app.main:app','--host','127.0.0.1','--port',str(api_port)]),('frontend',frontend_port,root/'frontend',['npm','run','dev','--','--host','127.0.0.1','--port',str(frontend_port),'--strictPort'])]:
     if listening(port):
         print(name+': already listening on '+str(port));continue
-    with (runtime/(name+'.log')).open('ab') as log:
+    if name=='backend' and os.environ.get('TRACELINE_RELOAD')=='1':
+        cmd += ['--reload','--reload-dir',str(root/'backend'/'app')]
+    with (runtime/(name+'-'+str(port)+'.log')).open('ab') as log:
         p=subprocess.Popen(cmd,cwd=cwd,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,close_fds=True)
     pids[name]=p.pid
     print(name+' started: '+str(p.pid))
-(runtime/'pids.json').write_text(json.dumps(pids))
-for name,url in [('backend','http://127.0.0.1:8010/api/v1/health'),('frontend proxy','http://127.0.0.1:5176/api/v1/health')]:
+if pids:
+    (runtime/f'pids-{api_port}-{frontend_port}.json').write_text(json.dumps(pids))
+for name,url in [('backend',f'http://127.0.0.1:{api_port}/api/v1/health'),('frontend proxy',f'http://127.0.0.1:{frontend_port}/api/v1/health')]:
     for attempt in range(30):
         try:
             with urllib.request.urlopen(url,timeout=2) as r: health=json.load(r)
@@ -32,4 +37,4 @@ for name,url in [('backend','http://127.0.0.1:8010/api/v1/health'),('frontend pr
         except Exception:
             if attempt==29:raise SystemExit(name+' did not become healthy; inspect work/traceline-runtime logs')
             time.sleep(.5)
-print('Open http://127.0.0.1:5176/')
+print(f'Open http://127.0.0.1:{frontend_port}/')

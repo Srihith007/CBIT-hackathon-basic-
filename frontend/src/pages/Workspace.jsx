@@ -23,6 +23,7 @@ import TechnicalPanel from '../components/TechnicalPanel';
 import { FindingDetail, FindingRow } from '../components/FindingParts';
 import { FrameDrawer, SensorDrawer, StatementDrawer } from '../components/EvidenceDrawers';
 import { IncidentCards, IncidentGallery, IncidentOverview, IncidentVehicles } from '../components/IncidentAnalysis';
+import ReconstructionReadiness from '../components/ReconstructionReadiness';
 import CaseBanner from '../components/CaseBanner';
 import CaseMeta from '../components/CaseMeta';
 import IncidentMoment, { MomentBar } from '../components/IncidentMoment';
@@ -304,9 +305,10 @@ export default function Workspace() {
       <div className="recon-page-actions"><Button size="sm" variant="outline" onClick={() => showInspector('technical')}>Advanced details</Button></div>
       <CaseBanner designation={c.designation} warning={eff.warning} />
       <div className="mb-3"><CaseMeta c={c} /></div>
+      <ReconstructionReadiness caseId={caseId} revision={scenarioId} compact onBuilt={s => load(s.id)} />
 
       {data.none ? (
-        <ErrorState title="No reconstruction yet" description="The pipeline has not produced a reconstruction for this case. Open the dashboard to check processing jobs." />
+        <ErrorState title="No reconstruction yet" description="Review evidence setup above, then build a reconstruction." />
       ) : (
         <>
           <section className="recon-summary" aria-label="Incident summary"><span className="t-eyebrow text-accent-text">INCIDENT SUMMARY</span><p>{executive?.sentences?.[0] || 'Review the recorded events and their evidence.'}</p><div className="flex flex-wrap gap-2"><Badge variant="neutral">{videos.length} recording{videos.length === 1 ? '' : 's'}</Badge><Badge variant="neutral">{data.finds.length} items to review</Badge><Badge variant="neutral">{eff.value}</Badge></div></section>
@@ -332,7 +334,7 @@ export default function Workspace() {
           </div>
 
           <div className="recon-review-sections">
-          <details className="recon-disclosure"><summary><span>Key findings & open questions</span><small>{data.finds.length} items · conflicts, support & missing evidence</small></summary><div className="recon-disclosure-body">          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={events} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
+          <details className="recon-disclosure"><summary><span>Key findings & open questions</span><small>{data.finds.length} items · conflicts, support & missing evidence</small></summary><div className="recon-disclosure-body">          <InvestigationFindings caseId={caseId} cons={data.cons} crbs={data.crbs} gaps={shown.gaps} finds={data.finds} events={[...events, ...data.tl.unplaced]} nameOf={nameOf} onReview={review} onSeek={seekTo} onPickEvent={pickById}
                               onSeekMedia={(evId, ms) => { window.scrollTo({ top: 0, behavior: 'smooth' }); seekToFrame({ evidence_id: evId, time_ms: ms }); }} />
 </div></details>
           <details className="recon-disclosure" onToggle={(e) => setSourcesOpen(e.currentTarget.open)}><summary><span>Sources & vehicles</span><small>Recordings, identities & evidence details</small></summary><div className="recon-disclosure-body">{NavRail}{sourcesOpen && <Evidence caseId={caseId} evidence={data.ev} />}</div></details>

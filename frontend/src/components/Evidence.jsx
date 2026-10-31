@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Badge, Card } from '../ui-kit';
+import WitnessReview from './WitnessReview';
+import { Badge, Button, Card } from '../ui-kit';
 import { api } from '../api';
 
-export function Statement({ st, label }) {
+export function Statement({ st, label, evidence = [], onChanged, revision }) {
   const [claims, setClaims] = useState([]);
-  useEffect(() => { api.claims(st.id).then((r) => setClaims(r.items)).catch(() => {}); }, [st.id]);
+  const [extraction, setExtraction] = useState(null);
+  const [review, setReview] = useState(false);
+  const [error, setError] = useState('');
+  const reload = async () => { try { const r = await api.claims(st.id); setClaims(r.items); setExtraction(r.extraction); setError(''); } catch (e) { setError(e.message); } };
+  useEffect(() => { reload(); }, [st.id, revision]);
+  const changed = async () => { await reload(); onChanged?.(); };
   const spans = claims.map((c) => [c.explicit_statement.char_start, c.explicit_statement.char_end, c]).sort((a, b) => a[0] - b[0]);
   const out = [];
   let at = 0;
@@ -18,7 +24,10 @@ export function Statement({ st, label }) {
   return (
     <Card padded={false} className="p-4">
       <div className="mb-1 flex items-center gap-2"><span className="t-small font-medium">{label}</span>{st.synthetic && <Badge variant="warning">synthetic</Badge>}</div>
-      <p className="t-small whitespace-pre-wrap text-fg-2">{out}</p>
+      <p className="t-small line-clamp-3 whitespace-pre-wrap text-fg-2">{out}</p>
+      <div className="mt-3 flex items-center justify-between gap-3"><Badge variant={claims.length ? 'info' : 'warning'}>{claims.length ? `${claims.length} claims · review required` : 'Claims need extraction'}</Badge><Button size="sm" variant="outline" onClick={() => setReview(true)}>Review claims</Button></div>
+      {error && <p role="alert" className="t-caption mt-2 text-danger">{error}</p>}
+      {review && <WitnessReview st={st} label={label} claims={claims} extraction={extraction} evidence={evidence} onChanged={changed} onClose={() => setReview(false)} />}
       <p className="t-caption mt-2 text-fg-3">Highlighted spans are extracted claims ({claims.length}). The original text is stored unchanged.</p>
     </Card>
   );
@@ -44,7 +53,7 @@ export default function Evidence({ caseId, evidence }) {
           </Card>
         ))}
       </ul>
-      {wit.map(({ s, label }) => <Statement key={s.id} st={s} label={label} />)}
+      {wit.map(({ s, label }) => <Statement key={s.id} st={s} label={label} evidence={evidence} />)}
     </div>
   );
 }
