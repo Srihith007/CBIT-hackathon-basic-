@@ -210,7 +210,7 @@ export default function Workspace() {
   const reviewed = (data.finds || []).filter((f) => f.review_status === 'reviewed').length;
   const analysis = model?.overview.analysis;
 
-  const NavRail = (
+  const NavRail = data.none ? null : (
     <Panel as="nav" className="h-fit p-3" aria-label="Case navigation">
       <div className="mb-2 flex items-center justify-between"><h2 className="t-eyebrow text-fg-3">Investigation</h2><IconButton icon={PanelLeftClose} label="Collapse navigation" size="sm" onClick={toggleNav} /></div>
       <dl className="t-caption space-y-1 rounded-lg bg-surface-2/50 p-2.5 text-fg-3">

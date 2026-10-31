@@ -346,3 +346,11 @@ describe('overlap, hypothesis explanation and association actions', () => {
     expect(document.body.textContent).not.toMatch(/Not available from this backend build yet/);
   });
 });
+
+describe('a case with no reconstruction', () => {
+  it('shows an honest empty state instead of crashing (regression: the navigation rail read missing data)', async () => {
+    setup({ scenarios: [] });
+    expect(await screen.findByText('No reconstruction yet')).toBeInTheDocument();
+    expect(document.body.textContent).toMatch(/has not produced a reconstruction/);
+  });
+});
