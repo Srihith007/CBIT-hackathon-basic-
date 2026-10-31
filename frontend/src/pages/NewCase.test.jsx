@@ -34,14 +34,14 @@ describe('guided flow: create investigation', () => {
     expect(api.createCase).toHaveBeenCalledWith({ title: 'Junction', designation: 'real', description: 'North approach', code: 'REF-2026-14' });
     expect(useCaseContext.getState().selected).toMatchObject({ id: 'c1', designation: 'real' });
   });
-  it('sends incident time with the chosen offset and the location to the backend, and no longer says they are browser-only', async () => {
+  it('sends incident time (with the browser offset, not asked for) and the location to the backend, and no longer says they are browser-only', async () => {
     wrap('/new?title=Junction&designation=real');
     fireEvent.change(screen.getByLabelText(/^Incident date and time/), { target: { value: '2026-10-30T10:32' } });
-    fireEvent.change(screen.getByLabelText(/^Time zone offset/), { target: { value: '+05:30' } });
+    expect(screen.queryByLabelText(/Time zone offset/)).toBeNull();
     fireEvent.change(screen.getByLabelText(/^Location/), { target: { value: 'Main St' } });
     expect(screen.queryByText(/Kept in this browser only/)).toBeNull();
     await create();
-    expect(api.createCase).toHaveBeenCalledWith({ title: 'Junction', designation: 'real', incident_at: '2026-10-30T10:32:00+05:30', location_text: 'Main St' });
+    expect(api.createCase).toHaveBeenCalledWith({ title: 'Junction', designation: 'real', incident_at: expect.stringMatching(/^2026-10-30T10:32:00[+-]\d{2}:\d{2}$/), location_text: 'Main St' });
     expect(localStorage.getItem('traceline.caseMeta.c1')).toBeNull();
   });
   it('omits incident time and location when they are left empty', async () => {

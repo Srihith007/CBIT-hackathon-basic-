@@ -82,6 +82,7 @@ export const api = {
   fullFrameUrl: (frameId) => `${BASE}/frames/${frameId}/image?full=true`,
   modelRuns: (evId) => req(`/evidence/${evId}/model-runs`),
   tracks: (evId) => req(`/evidence/${evId}/tracks`),
+  track: (pk) => req(`/tracks/${pk}`),
   streamUrl: (evId) => `${BASE}/evidence/${evId}/stream`,
   pdfUrl: (rid) => `${BASE}/reports/${rid}/pdf`,
 };

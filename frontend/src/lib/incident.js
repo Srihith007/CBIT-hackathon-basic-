@@ -1,4 +1,4 @@
-/** Incident time as the backend stores it: an instant with a timezone offset the investigator states. Nothing here assumes a zone. */
+/** The backend requires an offset on incident_at. The form does not ask for one: it sends this browser's offset for the entered time, so the stored value matches what was typed. */
 const pad = (n) => String(Math.abs(n)).padStart(2, '0');
 
 /** Offsets offered in the form (UTC-12:00 to UTC+14:00 in 15-minute steps that occur in practice). */
@@ -31,8 +31,8 @@ export function splitIncidentAt(iso) {
   return m ? { local: m[1], offset: m[2] === 'Z' ? '+00:00' : m[2] } : { local: '', offset: '' };
 }
 
-/** "2026-10-30 10:32 (UTC+05:30)" or null. The offset shown is the one stored. */
+/** "2026-10-30 10:32" or null: the time as entered, without the offset (the backend stores one; the UI does not ask for or show it). */
 export function formatIncidentAt(iso) {
   const p = splitIncidentAt(iso);
-  return p.local ? `${p.local.replace('T', ' ')} (UTC${p.offset})` : null;
+  return p.local ? p.local.replace('T', ' ') : null;
 }
