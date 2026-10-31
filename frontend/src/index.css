@@ -6,4 +6,3 @@
 
 /* A hidden tooltip anchored to the right-most topbar button can extend past a 360px viewport; clip it instead of creating a horizontal page scrollbar. */
 html { overflow-x: clip; }
-

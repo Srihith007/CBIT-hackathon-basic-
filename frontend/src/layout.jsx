@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { AppShell, Brand, Button, CommandPaletteProvider, MobileNav, Sidebar, ThemeSwitcher, Topbar, useCommandPalette } from './ui-kit';
+import { Brand, Button, CommandPaletteProvider, ThemeSwitcher, useCommandPalette } from './ui-kit';
 import { FilePlus2, FileText, FolderSearch, Layers, LayoutDashboard, ScanSearch, Search } from 'lucide-react';
 import { api } from './api';
 import { useCaseContext } from './caseContext';
