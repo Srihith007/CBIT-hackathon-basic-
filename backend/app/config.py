@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     detector_imgsz: int = 640
     detector_conf: float = 0.15             # storage threshold (keep weak boxes for tracking); the API filters for display
     accident_model: str | None = "accident_yolov8s"   # set to empty to disable the accident cue
-    accident_conf: float = 0.25
+    accident_conf: float = 0.54
     detector_device: str = "auto"           # auto -> mps if available, else cpu
 
     max_video_mb: int = 500
