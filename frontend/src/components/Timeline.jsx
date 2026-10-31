@@ -21,6 +21,7 @@ export default function Timeline({ tl, gaps = [], overlaps = [], onSelect, onSee
   const [scope, setScope] = useState('key');
   const highlight = useWorkspace((s) => s.highlightIds);
   const focus = useWorkspace((s) => s.focusRange);
+  const incident = useWorkspace((s) => s.incident);
   const [view, setView] = useState(null);
   const head = useRef(null);
   const headLabel = useRef(null);
@@ -113,6 +114,7 @@ export default function Timeline({ tl, gaps = [], overlaps = [], onSelect, onSee
                 </g>
               ))}
             </g>
+            {incident && x(incident.ms) > LEFT && x(incident.ms) < LEFT + plotW && <g pointerEvents="none"><rect x={Math.min(x(incident.ms) - 4, LEFT + plotW - 150)} y={2} width={150} height={13} rx={3} fill="rgb(var(--danger))" /><text x={Math.min(x(incident.ms) - 4, LEFT + plotW - 150) + 5} y={11.5} fontSize="9.5" fill="rgb(var(--danger-fg))" fontWeight="600">POSSIBLE ACCIDENT {formatTime(incident.ms)}</text></g>}
             {/* lane labels + click-to-seek surface */}
             <rect x={LEFT} y={RULER} width={plotW} height={h - RULER} fill="transparent" onPointerDown={seekAt} style={{ cursor: 'crosshair' }} />
             <g clipPath="url(#plot)" aria-label="Recording overlap" pointerEvents="none">
@@ -130,6 +132,7 @@ export default function Timeline({ tl, gaps = [], overlaps = [], onSelect, onSee
             ))}
             {bands.length > 0 && <g><line x1={LEFT} x2={LEFT + plotW} y1={RULER + gapRow * ROW + ROW} y2={RULER + gapRow * ROW + ROW} stroke="rgb(var(--line))" /><text x={10} y={RULER + gapRow * ROW + ROW / 2 + 4} className="fill-warning" fontSize="11" fontWeight="500">Gaps</text></g>}
             <g clipPath="url(#plot)">
+              {incident && <g pointerEvents="none"><rect x={x(incident.ms - 300)} y={RULER} width={Math.max(x(incident.ms + 300) - x(incident.ms - 300), 6)} height={h - RULER} fill="rgb(var(--danger))" opacity="0.22" /><line x1={x(incident.ms)} x2={x(incident.ms)} y1={RULER} y2={h} stroke="rgb(var(--danger))" strokeWidth="2" strokeDasharray="4 3" /><title>{`Possible accident moment, case ${formatTime(incident.ms)}`}</title></g>}
               {focus && <rect x={x(focus.start)} y={RULER} width={Math.max(x(focus.end) - x(focus.start), 4)} height={h - RULER} fill="rgb(var(--accent))" opacity="0.13" pointerEvents="none"><title>Selected finding interval</title></rect>}
               {bands.map((g) => (
                 <rect key={g.id} x={x(g.scope.case_from_ms)} y={RULER + gapRow * ROW + 4} width={Math.max(x(g.scope.case_to_ms) - x(g.scope.case_from_ms), 3)} height={ROW - 8} rx={3} fill="url(#hatch)" stroke="rgb(var(--warning))" strokeOpacity="0.6" pointerEvents="none">

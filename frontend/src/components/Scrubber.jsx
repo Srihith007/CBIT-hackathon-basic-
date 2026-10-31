@@ -6,6 +6,7 @@ import { CATEGORY_STYLE } from '../fmt';
  *  CSS transform: React does not re-render this component while the video plays. */
 export default function Scrubber({ range, events, onSeek, onSelect }) {
   const wrap = useRef(null);
+  const incident = useWorkspace((s) => s.incident);
   const head = useRef(null);
   const [lo, hi] = range;
   const span = Math.max(hi - lo, 1);
@@ -46,6 +47,7 @@ export default function Scrubber({ range, events, onSeek, onSelect }) {
                 onClick={() => onSelect(first)} style={{ left: `${pct(first.start_ms)}%`, background: CATEGORY_STYLE[first.category]?.color, height: `${Math.min(12 + n * 2, 22)}px` }}
                 className="absolute top-1/2 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-sm opacity-80 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" />
       ))}
+      {incident && <div className="pointer-events-none absolute top-0 h-full w-1.5 -translate-x-1/2 rounded-sm bg-danger" style={{ left: `${pct(incident.ms)}%` }} title="Possible accident moment" aria-hidden />}
       <div ref={head} className="pointer-events-none absolute top-0 h-full w-0.5 -translate-x-1/2 bg-accent shadow-[0_0_0_3px_rgb(var(--accent)/0.2)]" aria-hidden />
     </div>
   );

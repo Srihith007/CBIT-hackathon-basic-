@@ -162,6 +162,8 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
   const raf = useRef(0);
   const overlays = useWorkspace((s) => s.overlays);
   const selectedActor = useWorkspace((s) => s.selectedActorId);
+  const incident = useWorkspace((s) => s.incident);
+  const atMoment = useWorkspace((s) => !!s.incident && Math.abs(s.currentMs - s.incident.ms) <= 600);
   const [windowKey, setWindowKey] = useState(-1);
 
   // the media window we need overlays for follows the playhead in 10 s blocks (fetched from the API; never generated here)
@@ -184,6 +186,8 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
     return useWorkspace.subscribe((s, p) => { if (s.currentMs !== p.currentMs) check(s.currentMs); });
   }, [shift, v.id]);
 
+  const atMomentRef = useRef(false);
+  atMomentRef.current = atMoment;
   const draw = useCallback(() => {
     const cv = canvas.current;
     const el = video.current;
@@ -200,10 +204,11 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
       const r = mapBox(b.bbox, tf);
       const actor = trackActors[`${v.id}:${b.track_id}`];
       const color = actor ? ACTOR_COLORS[actor.index % ACTOR_COLORS.length] : '#94a3b8';
-      const dim = selectedActor && (!actor || actor.id !== selectedActor);
+      const involved = !!incident && incident.trackKeys.includes(`${v.id}:${b.track_id}`) && Math.abs(el.currentTime * 1000 - (incident.ms + (shift ?? 0))) <= 2000;
+      const dim = (selectedActor && (!actor || actor.id !== selectedActor)) || (!!incident && atMomentRef.current && !involved);
       ctx.globalAlpha = dim ? 0.35 : 1;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = selectedActor && actor?.id === selectedActor ? 3.5 : 2;
+      ctx.strokeStyle = involved ? '#ef4444' : color;
+      ctx.lineWidth = involved ? 4 : selectedActor && actor?.id === selectedActor ? 3.5 : 2;
       ctx.setLineDash(b.backfilled ? [4, 3] : []);
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       if (overlays.ids) {
@@ -215,7 +220,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
       }
       ctx.globalAlpha = 1;
     });
-  }, [overlays, selectedActor, trackActors, actorLabels, v.id]);
+  }, [overlays, selectedActor, trackActors, actorLabels, v.id, incident, shift]);
 
   // redraw on clock changes (coalesced to one frame), seeks, resizes; no free-running loop
   useEffect(() => {
@@ -237,6 +242,7 @@ function Tile({ v, setRef, shift, trackActors, actorLabels, primary, onMakePrima
       <div className="relative mx-auto w-full bg-black [@media(max-height:1100px)]:max-h-[32vh] [@media(min-height:1101px)]:max-h-[min(52vh,560px)]" style={{ aspectRatio: `${v.video.width} / ${v.video.height}`, maxWidth: primary ? `min(100%, ${(40 * v.video.width / v.video.height).toFixed(1)}vh)` : '100%' }}>
         <video ref={(el) => { video.current = el; setRef(el); }} src={api.streamUrl(v.id)} muted playsInline preload="auto" className="absolute inset-0 h-full w-full object-contain" />
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
+        {atMoment && primary && <div className="pointer-events-none absolute inset-0 border-4 border-danger" aria-hidden><span className="absolute left-2 top-2 rounded bg-danger px-2 py-0.5 text-xs font-semibold text-white">POSSIBLE ACCIDENT · not confirmed</span></div>}
         {shift == null && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">Not synchronized: no recorded clock relation. Not slaved to the case clock.</div>}
         {shift != null && !inside && <div className="absolute inset-x-0 bottom-0 bg-black/75 px-3 py-1.5 text-xs text-white">No footage at this case time.</div>}
       </div>
