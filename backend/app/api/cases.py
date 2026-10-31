@@ -66,8 +66,12 @@ def create_case(body: CaseCreate, db: Session = Depends(get_db), actor: str = De
         db.add(case)
         try:
             db.flush()
-        except IntegrityError:
+        except IntegrityError as exc:
             db.rollback()
+            constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            # Only a case-code uniqueness collision should be retried. Other constraints are database errors.
+            if constraint != "cases_code_key":
+                raise
             if body.code:
                 raise AppError(409, "CASE_CODE_TAKEN", f"Case code {body.code} is already used")
             continue

@@ -2,7 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,4 +54,8 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    try:
+        return Settings()
+    except ValidationError:
+        from app.errors import AppError
+        raise AppError(503, "SERVER_CONFIGURATION_ERROR", "Server configuration is missing or invalid. Copy .env.example to .env in the repository root, set DATABASE_URL, then restart the backend.") from None

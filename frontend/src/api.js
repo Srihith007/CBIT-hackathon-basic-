@@ -3,7 +3,7 @@ const BASE = '/api/v1';
 
 export class ApiError extends Error {
   constructor(status, body) {
-    super(body?.error?.message || `HTTP ${status}`);
+    super(body?.error?.message || (status >= 500 ? 'The server could not complete this request. Check the backend and PostgreSQL setup.' : `HTTP ${status}`));
     this.status = status;
     this.code = body?.error?.code;
   }

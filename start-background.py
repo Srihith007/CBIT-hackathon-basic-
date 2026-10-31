@@ -14,8 +14,10 @@ frontend_port=int(os.environ.get('TRACELINE_FRONTEND_PORT','5176'))
 env['TRACELINE_API_URL']=f'http://127.0.0.1:{api_port}'
 def listening(port):
     with socket.socket() as s:return s.connect_ex(('127.0.0.1',port))==0
-if not listening(55432):
-    raise SystemExit('PostgreSQL is stopped. Run bash start-local.sh first.')
+if not listening(api_port):
+    result=subprocess.run([str(root/'backend/.venv/bin/python'),'-m','app.bootstrap'],cwd=root/'backend',env=env)
+    if result.returncode:
+        raise SystemExit('Database is not ready. Run python setup-local.py; no database reset is needed.')
 pids={}
 for name,port,cwd,cmd in [('backend',api_port,root/'backend',[str(root/'backend/.venv/bin/python'),'-m','uvicorn','app.main:app','--host','127.0.0.1','--port',str(api_port)]),('frontend',frontend_port,root/'frontend',['npm','run','dev','--','--host','127.0.0.1','--port',str(frontend_port),'--strictPort'])]:
     if listening(port):

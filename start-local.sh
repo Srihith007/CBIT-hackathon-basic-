@@ -5,6 +5,10 @@ PROJECT_DIR="$PWD"
 WORK_DIR="$(dirname "$PROJECT_DIR")/work"
 PG_BIN="$WORK_DIR/postgres-runtime/node_modules/@embedded-postgres/darwin-arm64/native/bin"
 PG_DATA="$WORK_DIR/traceline-pg"
+if [ ! -x "$PG_BIN/initdb" ] || [ ! -f "$WORK_DIR/pg-password" ]; then
+  echo "No machine-local embedded PostgreSQL runtime. Using the database configured in root .env."
+  exec python3 "$PROJECT_DIR/run-local.py"
+fi
 export PATH="$WORK_DIR/media-runtime/node_modules/@ffmpeg-installer/darwin-arm64:$WORK_DIR/media-runtime/node_modules/@ffprobe-installer/darwin-arm64:$PATH"
 chmod +x "$WORK_DIR/media-runtime/node_modules/@ffprobe-installer/darwin-arm64/ffprobe"
 if [ ! -f "$PG_DATA/PG_VERSION" ]; then

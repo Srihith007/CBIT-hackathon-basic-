@@ -1,6 +1,9 @@
 """GET /api/v1/health: dependency status. Reports whether secrets are configured, never their values."""
 import shutil
 import subprocess
+from pathlib import Path
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -41,9 +44,14 @@ def health(db: Session = Depends(get_db), settings: Settings = Depends(get_setti
     try:
         db.execute(text("SELECT 1"))
         revision = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        database = {"ok": True, "migration": revision}
+        cfg = Config()
+        cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
+        required = ScriptDirectory.from_config(cfg).get_current_head()
+        database = {"ok": revision == required, "connected": True, "migration": revision, "required_migration": required}
+        if revision != required:
+            database["action"] = "Apply database migrations: run python setup-local.py from the repository root."
     except Exception as exc:  # noqa: BLE001
-        database = {"ok": False, "error": type(exc).__name__}
+        database = {"ok": False, "error": type(exc).__name__, "action": "Check root .env DATABASE_URL, start PostgreSQL, then run python setup-local.py."}
     storage = _storage(settings)
     ffmpeg = _ffmpeg()
     return {
