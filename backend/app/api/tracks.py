@@ -51,7 +51,7 @@ def track_detail(track_pk: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/evidence/{evidence_id}/overlays")
-def overlays(from_ms: int = Query(0, ge=0), to_ms: int = Query(..., ge=0), min_conf: float = Query(0.25, ge=0, le=1),
+def overlays(from_ms: int = Query(0, ge=0), to_ms: int = Query(..., ge=0), min_conf: float = Query(0.54, ge=0, le=1),
              ev: EvidenceFile = Depends(get_evidence), db: Session = Depends(get_db)) -> dict:
     """Boxes with track IDs for the player, per sampled frame in [from_ms, to_ms] (max 60 s). Boxes exist only on sampled frames;
     any drawing between them is an interpolation and must be shown as such."""

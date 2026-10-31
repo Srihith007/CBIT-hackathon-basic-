@@ -44,7 +44,7 @@ def model_runs(ev: EvidenceFile = Depends(get_evidence), db: Session = Depends(g
 @router.get("/evidence/{evidence_id}/detections")
 def detections(from_ms: int = Query(0, ge=0), to_ms: int | None = Query(None, ge=0),
                classes: str | None = Query(None, description="comma-separated, e.g. car,bus,pedestrian,accident_cue"),
-               min_conf: float = Query(0.25, ge=0, le=1, description="display threshold; boxes down to the storage threshold exist"),
+               min_conf: float = Query(0.54, ge=0, le=1, description="display threshold; boxes down to the storage threshold exist"),
                include_accident_cue: bool = True, model_run_id: str | None = None, include_empty: bool = False,
                ev: EvidenceFile = Depends(get_evidence), db: Session = Depends(get_db)) -> dict:
     """Machine detections per sampled frame. Coordinates are pixels of the frame OpenCV decoded. video.rotation is reported separately and is not applied to these boxes."""

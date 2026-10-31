@@ -14,7 +14,7 @@ VIDEO_EVENTS_VERSION = "2"
 DEFAULTS = {"moving_rel_speed": 0.5, "stopped_rel_speed": 0.15, "stop_min_s": 1.0, "slow_drop": 0.5, "slow_window_s": 0.8,
             "turn_deg": 30.0, "turn_window_s": 1.6, "min_turn_rel_speed": 0.3, "maneuver_min_path_diag": 3.0,
             "interaction_iou": 0.05, "interaction_gap_diag": 0.08, "near_miss_gap_diag": 0.5, "collision_drop": 0.6,
-            "collision_lookahead_s": 0.8, "cue_window_s": 0.5, "cue_min_conf": 0.4, "entry_margin_s": 0.5,
+            "collision_lookahead_s": 0.8, "cue_window_s": 0.5, "cue_min_conf": 0.54, "entry_margin_s": 0.5,
             "segment_gap_factor": 1.5}
 
 
